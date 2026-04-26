@@ -17,7 +17,10 @@
     <img alt="Discord" src="https://img.shields.io/discord/803299970169700402?logo=discord&logoColor=white&label=Discord&color=5165f6"></a> -->
 </div>
 
-# ⬇️ Get DSBmaterial from here
+## ❓ Why does this app exist?
+- The offical DSBmobile app sucks for various reasons (outdated ui, not reliable, just displays a webpage), so i decided to make my own app with an Material You UI, Class Filtering and Displaying content natively.
+
+## ⬇️ Get DSBmaterial from here
 
 <p align="left">
   <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/WollyDev24/DSB_Material">
@@ -43,7 +46,7 @@ app/src/main/java/dev/wolly/dsbmaterial/
 └── MainActivity.kt           # Main entry point and all Compose UI screens
 ```
 
-# 🛠️ Building the app from source:
+## 🛠️ Building the app from source:
 
 1. **Clone the repo**
 ```bash
@@ -61,3 +64,12 @@ git clone https://github.com/WollyDev24/DSB_Material/
 4. **Run**
    - Connect a device or start an emulator
    - Click Run (▶️)
+
+## ⭐ Special Thanks to
+- [Tenner/dsbmobile](https://github.com/Tenner/dsbmobile) - Understanding of the API
+
+## 📄 License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+
+---
