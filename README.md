@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Material You Expressive alternative to the DSBmobile app</strong><br>
+  <strong>Material You Expressive alternative for the DSBmobile app</strong><br>
 </p>
 
 <div align="center">    
@@ -28,13 +28,36 @@
     <img src="assets/fdroid.png" alt="Get it on Fdroid" height="60" /></a>
 </p>
 
+## 📂 Project Structure
+
+```text
+app/src/main/java/dev/wolly/dsbmaterial/
+├── api/
+│   └── DSBMobileAPI.kt       # API client for DSBmobile (with GZIP/HTML parsing)
+├── data/
+│   ├── DataStoreManager.kt   # Persistent storage for user settings & credentials
+│   └── Models.kt             # Data classes for substitution entries
+├── ui/
+│   ├── theme/                # Material 3 Theme, Color, Type, and Shape definitions
+│   └── MainViewModel.kt      # ViewModel handling business logic and UI state
+└── MainActivity.kt           # Main entry point and all Compose UI screens
+```
+
 # 🛠️ Building the app from source:
 
-- Clone the repo:
+1. **Clone the repo**
 ```bash
 git clone https://github.com/WollyDev24/DSB_Material/
 ```
+2. **Open in Android Studio**
+   - Open Android Studio
+   - Select "Open an Existing Project"
+   - Navigate to the cloned directory
 
-- open the folder in Android studio
-- wait for gradle to sync
-- build the app
+3. **Sync and Build**
+   - Wait for Gradle to sync dependencies
+   - Build the project (Build → Make Project)
+
+4. **Run**
+   - Connect a device or start an emulator
+   - Click Run (▶️)
