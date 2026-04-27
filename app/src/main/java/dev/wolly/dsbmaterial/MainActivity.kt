@@ -55,20 +55,21 @@ fun DSBApp(viewModel: MainViewModel) {
     val isRoomFirst by viewModel.isRoomFirst.collectAsState()
     val sortByPeriod by viewModel.sortByPeriod.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
+    val selectedTab by viewModel.selectedTab.collectAsState()
+    val archiveEntries by viewModel.archive.collectAsState()
+    
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
     var selectedDay by remember { mutableStateOf<String?>(null) }
     var showSheet by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = showSheet || uiState is UiState.Settings || uiState is UiState.SelectingClass || uiState is UiState.About) {
+    BackHandler(enabled = showSheet || uiState is UiState.SelectingClass || selectedTab != 0) {
         if (showSheet) {
             showSheet = false
-        } else if (uiState is UiState.Settings) {
-            viewModel.closeSettings()
         } else if (uiState is UiState.SelectingClass) {
             viewModel.cancelClassSelection()
-        } else if (uiState is UiState.About) {
-            viewModel.openSettings()
+        } else {
+            viewModel.setTab(0)
         }
     }
 
@@ -77,34 +78,53 @@ fun DSBApp(viewModel: MainViewModel) {
             TopAppBar(
                 title = { 
                     Text(
-                        when {
-                            uiState is UiState.Settings -> stringResource(R.string.title_settings)
-                            uiState is UiState.About -> stringResource(R.string.title_about)
+                        when (selectedTab) {
+                            1 -> stringResource(R.string.label_archive)
+                            2 -> stringResource(R.string.title_settings)
                             else -> stringResource(R.string.title_main)
                         },
                         fontWeight = FontWeight.ExtraBold
                     ) 
                 },
-                navigationIcon = {
-                    if (uiState is UiState.Settings || uiState is UiState.About) {
-                        IconButton(onClick = { 
-                            if (uiState is UiState.About) viewModel.openSettings() else viewModel.closeSettings() 
-                        }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    }
-                },
                 actions = {
-                    if (uiState is UiState.Success || uiState is UiState.Idle) {
+                    if (selectedTab == 0 && (uiState is UiState.Success || uiState is UiState.Idle)) {
+                        IconButton(onClick = { viewModel.archiveCurrentSubstitutions() }) {
+                            Icon(Icons.Default.Archive, contentDescription = "Archive current")
+                        }
                         IconButton(onClick = { viewModel.fetchData() }) {
                             Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
                         }
-                        IconButton(onClick = { viewModel.openSettings() }) {
-                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.title_settings))
+                    } else if (selectedTab == 1 && archiveEntries.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.clearArchive() }) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = "Clear archive")
                         }
                     }
                 }
             )
+        },
+        bottomBar = {
+            if (uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass) {
+                NavigationBar {
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Home, contentDescription = null) },
+                        label = { Text(stringResource(R.string.title_main)) },
+                        selected = selectedTab == 0,
+                        onClick = { viewModel.setTab(0) }
+                    )
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Archive, contentDescription = null) },
+                        label = { Text(stringResource(R.string.label_archive)) },
+                        selected = selectedTab == 1,
+                        onClick = { viewModel.setTab(1) }
+                    )
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        label = { Text(stringResource(R.string.title_settings)) },
+                        selected = selectedTab == 2,
+                        onClick = { viewModel.setTab(2) }
+                    )
+                }
+            }
         }
     ) { innerPadding ->
         Surface(
@@ -114,60 +134,69 @@ fun DSBApp(viewModel: MainViewModel) {
             color = MaterialTheme.colorScheme.background
         ) {
             AnimatedContent(
-                targetState = uiState,
+                targetState = if (uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass) uiState else selectedTab,
                 transitionSpec = {
                     (fadeIn(animationSpec = tween(300, delayMillis = 90)) + scaleIn(initialScale = 0.92f, animationSpec = tween(300, delayMillis = 90)))
                         .togetherWith(fadeOut(animationSpec = tween(90)))
                 },
                 label = "screen_transition"
-            ) { state ->
-                when (state) {
+            ) { target ->
+                when (target) {
                     is UiState.Loading -> LoadingScreen()
-                    is UiState.Success -> {
-                        DayList(
-                            entries = state.entries,
-                            onDayClick = { day ->
-                                selectedDay = day
-                                showSheet = true
-                            }
-                        )
-                        
-                        if (showSheet && selectedDay != null) {
-                            ModalBottomSheet(
-                                onDismissRequest = { showSheet = false },
-                                sheetState = sheetState,
-                                shape = MaterialTheme.shapes.extraLarge,
-                                dragHandle = {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                scope.launch {
-                                                    if (sheetState.currentValue == SheetValue.PartiallyExpanded) {
-                                                        sheetState.expand()
-                                                    } else {
-                                                        sheetState.partialExpand()
+                    is UiState.SelectingClass -> ClassSelectionScreen(
+                        classes = target.classes,
+                        onClassSelected = { cls -> viewModel.selectClass(target.u, target.p, cls) }
+                    )
+                    is UiState.NeedsLogin -> LoginScreen(onLogin = viewModel::login)
+                    0 -> { // Substitutions
+                        val state = uiState
+                        if (state is UiState.Success) {
+                            DayList(
+                                entries = state.entries,
+                                onDayClick = { day ->
+                                    selectedDay = day
+                                    showSheet = true
+                                }
+                            )
+                            
+                            if (showSheet && selectedDay != null) {
+                                ModalBottomSheet(
+                                    onDismissRequest = { showSheet = false },
+                                    sheetState = sheetState,
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                    dragHandle = {
+                                        Box(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    scope.launch {
+                                                        if (sheetState.currentValue == SheetValue.PartiallyExpanded) {
+                                                            sheetState.expand()
+                                                        } else {
+                                                            sheetState.partialExpand()
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            .padding(top = 16.dp, bottom = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        BottomSheetDefaults.DragHandle()
+                                                .padding(top = 16.dp, bottom = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            BottomSheetDefaults.DragHandle()
+                                        }
                                     }
+                                ) {
+                                    val dayEntries = state.entries.filter { it.day == selectedDay }
+                                    val isExpanded = sheetState.targetValue == SheetValue.Expanded
+                                    SubstitutionViewer(selectedDay!!, dayEntries, isRoomFirst, isExpanded)
                                 }
-                            ) {
-                                val dayEntries = state.entries.filter { it.day == selectedDay }
-                                val isExpanded = sheetState.targetValue == SheetValue.Expanded
-                                SubstitutionViewer(selectedDay!!, dayEntries, isRoomFirst, isExpanded)
                             }
+                        } else if (state is UiState.Error) {
+                            ErrorScreen(state.message, onRetry = { viewModel.fetchData() })
+                        } else {
+                            Box(Modifier.fillMaxSize())
                         }
                     }
-                    is UiState.SelectingClass -> ClassSelectionScreen(
-                        classes = state.classes,
-                        onClassSelected = { cls -> viewModel.selectClass(state.u, state.p, cls) }
-                    )
-                    is UiState.Settings -> SettingsScreen(
+                    1 -> ArchiveScreen(archiveEntries, isRoomFirst, onRemove = viewModel::removeFromArchive)
+                    2 -> SettingsScreen(
                         isRoomFirst = isRoomFirst,
                         sortByPeriod = sortByPeriod,
                         dynamicColor = dynamicColor,
@@ -176,12 +205,47 @@ fun DSBApp(viewModel: MainViewModel) {
                         onToggleDynamic = viewModel::toggleDynamicColor,
                         onChangeClass = viewModel::changeClass,
                         onLogout = viewModel::logout,
-                        onAbout = viewModel::openAbout
+                        onAbout = { /* Archive and Settings already have their screens */ }
                     )
-                    is UiState.About -> AboutScreen()
-                    is UiState.Error -> ErrorScreen(state.message, onRetry = { viewModel.fetchData() })
-                    is UiState.NeedsLogin -> LoginScreen(onLogin = viewModel::login)
-                    is UiState.Idle -> Box(Modifier.fillMaxSize())
+                    else -> Box(Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemove: (SubstitutionEntry) -> Unit) {
+    if (entries.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                Spacer(Modifier.height(16.dp))
+                Text("No archived substitutions", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+    } else {
+        val grouped = entries.groupBy { it.day }
+        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            grouped.forEach { (day, dayEntries) ->
+                item {
+                    Text(day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp))
+                }
+                items(dayEntries) { entry ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
+                    ) {
+                        Column {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                SubstitutionTableRow(entry, isRoomFirst)
+                                IconButton(onClick = { onRemove(entry) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

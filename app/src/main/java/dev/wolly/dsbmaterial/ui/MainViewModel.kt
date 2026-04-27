@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import dev.wolly.dsbmaterial.api.DSBMobileAPI
 import dev.wolly.dsbmaterial.data.DataStoreManager
 import dev.wolly.dsbmaterial.data.SubstitutionEntry
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -16,15 +18,17 @@ sealed class UiState {
     data class Error(val message: String) : UiState()
     object NeedsLogin : UiState()
     data class SelectingClass(val classes: List<String>, val u: String, val p: String) : UiState()
-    object Settings : UiState()
-    object About : UiState()
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val dataStoreManager = DataStoreManager(application)
+    private val gson = Gson()
     
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
     val uiState: StateFlow<UiState> = _uiState
+
+    private val _selectedTab = MutableStateFlow(0)
+    val selectedTab: StateFlow<Int> = _selectedTab
 
     val isRoomFirst: StateFlow<Boolean> = dataStoreManager.swapDataFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -35,10 +39,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val sortByPeriod: StateFlow<Boolean> = dataStoreManager.sortPeriodFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    private val _archive = MutableStateFlow<List<SubstitutionEntry>>(emptyList())
+    val archive: StateFlow<List<SubstitutionEntry>> = _archive
+
     private var lastSuccessEntries: List<SubstitutionEntry> = emptyList()
 
     init {
         checkCredentialsAndFetch()
+        loadArchive()
+    }
+
+    private fun loadArchive() {
+        viewModelScope.launch {
+            dataStoreManager.archiveFlow.collect { json ->
+                if (!json.isNullOrEmpty()) {
+                    val type = object : TypeToken<List<SubstitutionEntry>>() {}.type
+                    _archive.value = gson.fromJson(json, type)
+                }
+            }
+        }
+    }
+
+    fun archiveCurrentSubstitutions() {
+        val currentEntries = lastSuccessEntries
+        if (currentEntries.isNotEmpty()) {
+            viewModelScope.launch {
+                val newArchive = (currentEntries + _archive.value).distinctBy { 
+                    it.day + it.lesson + it.subject + it.room + it.art + it.text 
+                }
+                _archive.value = newArchive
+                dataStoreManager.saveArchive(gson.toJson(newArchive))
+            }
+        }
+    }
+
+    fun removeFromArchive(entry: SubstitutionEntry) {
+        viewModelScope.launch {
+            val newArchive = _archive.value.filter { it != entry }
+            _archive.value = newArchive
+            dataStoreManager.saveArchive(gson.toJson(newArchive))
+        }
+    }
+
+    fun clearArchive() {
+        viewModelScope.launch {
+            _archive.value = emptyList()
+            dataStoreManager.saveArchive("")
+        }
+    }
+
+    fun setTab(index: Int) {
+        _selectedTab.value = index
     }
 
     fun toggleColumnOrder() {
@@ -64,14 +115,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openSettings() {
-        _uiState.value = UiState.Settings
-    }
-
-    fun openAbout() {
-        _uiState.value = UiState.About
+        _selectedTab.value = 2
     }
 
     fun closeSettings() {
+        _selectedTab.value = 0
         if (lastSuccessEntries.isNotEmpty()) {
             _uiState.value = UiState.Success(sortEntries(lastSuccessEntries))
         } else {
@@ -150,6 +198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             dataStoreManager.clearCredentials()
             _uiState.value = UiState.NeedsLogin
+            _selectedTab.value = 0
         }
     }
 

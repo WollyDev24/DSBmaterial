@@ -28,6 +28,7 @@
     <string name="label_dynamic_color">Dynamic Color</string>
     <string name="label_sort_period">Sort by Period</string>
     <string name="label_about">About</string>
+    <string name="label_archive">Archive</string>
     
     <string name="desc_select_class">Choose your class from the list or enter it manually.</string>
     <string name="desc_swap_default">Default mapping</string>

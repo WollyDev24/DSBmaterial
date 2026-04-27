@@ -28,6 +28,7 @@
     <string name="label_dynamic_color">Dynamische Farben</string>
     <string name="label_sort_period">Nach Stunde sortieren</string>
     <string name="label_about">Über</string>
+    <string name="label_archive">Archiv</string>
     
     <string name="desc_select_class">Wähle deine Klasse aus der Liste oder gib sie manuell ein.</string>
     <string name="desc_swap_default">Standard-Zuordnung</string>
