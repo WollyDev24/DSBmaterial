@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
@@ -54,19 +55,21 @@ fun DSBApp(viewModel: MainViewModel) {
     val isRoomFirst by viewModel.isRoomFirst.collectAsState()
     val sortByPeriod by viewModel.sortByPeriod.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
+    val selectedTab by viewModel.selectedTab.collectAsState()
+    val archiveEntries by viewModel.archive.collectAsState()
+    
     val sheetState = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
     var selectedDay by remember { mutableStateOf<String?>(null) }
     var showSheet by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = showSheet || uiState is UiState.Settings || uiState is UiState.SelectingClass || uiState is UiState.About) {
+    BackHandler(enabled = showSheet || uiState is UiState.SelectingClass || selectedTab != 0) {
         if (showSheet) {
             showSheet = false
-        } else if (uiState is UiState.Settings) {
-            viewModel.closeSettings()
         } else if (uiState is UiState.SelectingClass) {
             viewModel.cancelClassSelection()
-        } else if (uiState is UiState.About) {
-            viewModel.openSettings()
+        } else {
+            viewModel.setTab(0)
         }
     }
 
@@ -75,34 +78,106 @@ fun DSBApp(viewModel: MainViewModel) {
             TopAppBar(
                 title = { 
                     Text(
-                        when {
-                            uiState is UiState.Settings -> stringResource(R.string.title_settings)
-                            uiState is UiState.About -> stringResource(R.string.title_about)
+                        when (selectedTab) {
+                            1 -> stringResource(R.string.label_archive)
+                            2 -> stringResource(R.string.title_settings)
                             else -> stringResource(R.string.title_main)
                         },
                         fontWeight = FontWeight.ExtraBold
                     ) 
                 },
-                navigationIcon = {
-                    if (uiState is UiState.Settings || uiState is UiState.About) {
-                        IconButton(onClick = { 
-                            if (uiState is UiState.About) viewModel.openSettings() else viewModel.closeSettings() 
-                        }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    }
-                },
                 actions = {
-                    if (uiState is UiState.Success || uiState is UiState.Idle) {
+                    if (selectedTab == 0 && (uiState is UiState.Success || uiState is UiState.Idle)) {
                         IconButton(onClick = { viewModel.fetchData() }) {
                             Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
                         }
-                        IconButton(onClick = { viewModel.openSettings() }) {
-                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.title_settings))
+                    } else if (selectedTab == 1 && archiveEntries.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.clearArchive() }) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = "Clear archive")
                         }
                     }
                 }
             )
+        },
+        bottomBar = {
+            if (uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass) {
+                Surface(
+                    modifier = Modifier
+                        .padding(horizontal = 80.dp, vertical = 24.dp)
+                        .fillMaxWidth(),
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
+                    tonalElevation = 3.dp,
+                    shadowElevation = 8.dp
+                ) {
+                    NavigationBar(
+                        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        modifier = Modifier.height(80.dp),
+                        windowInsets = WindowInsets(0, 0, 0, 0)
+                    ) {
+                        NavigationBarItem(
+                            icon = { 
+                                val scale by animateFloatAsState(
+                                    targetValue = if (selectedTab == 0) 1.25f else 1f,
+                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                                    label = "home_scale"
+                                )
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                                    Icon(
+                                        Icons.Default.Home, 
+                                        contentDescription = stringResource(R.string.title_main), 
+                                        modifier = Modifier.size(26.dp).graphicsLayer(scaleX = scale, scaleY = scale)
+                                    )
+                                }
+                            },
+                            selected = selectedTab == 0,
+                            onClick = { viewModel.setTab(0) },
+                            alwaysShowLabel = false,
+                            label = null
+                        )
+//                        NavigationBarItem(
+//                            icon = {
+//                                val scale by animateFloatAsState(
+//                                    targetValue = if (selectedTab == 1) 1.25f else 1f,
+//                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+//                                    label = "archive_scale"
+//                                )
+//                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+//                                    Icon(
+//                                        Icons.Default.Archive,
+//                                        contentDescription = stringResource(R.string.label_archive),
+//                                        modifier = Modifier.size(26.dp).graphicsLayer(scaleX = scale, scaleY = scale)
+//                                    )
+//                                }
+//                            },
+//                            selected = selectedTab == 1,
+//                            onClick = { viewModel.setTab(1) },
+//                            alwaysShowLabel = false,
+//                            label = null
+//                        )
+                        NavigationBarItem(
+                            icon = { 
+                                val scale by animateFloatAsState(
+                                    targetValue = if (selectedTab == 2) 1.25f else 1f,
+                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                                    label = "settings_scale"
+                                )
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                                    Icon(
+                                        Icons.Default.Settings, 
+                                        contentDescription = stringResource(R.string.title_settings), 
+                                        modifier = Modifier.size(26.dp).graphicsLayer(scaleX = scale, scaleY = scale)
+                                    )
+                                }
+                            },
+                            selected = selectedTab == 2,
+                            onClick = { viewModel.setTab(2) },
+                            alwaysShowLabel = false,
+                            label = null
+                        )
+                    }
+                }
+            }
         }
     ) { innerPadding ->
         Surface(
@@ -112,41 +187,74 @@ fun DSBApp(viewModel: MainViewModel) {
             color = MaterialTheme.colorScheme.background
         ) {
             AnimatedContent(
-                targetState = uiState,
+                targetState = if (uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass) uiState else selectedTab,
                 transitionSpec = {
                     (fadeIn(animationSpec = tween(300, delayMillis = 90)) + scaleIn(initialScale = 0.92f, animationSpec = tween(300, delayMillis = 90)))
                         .togetherWith(fadeOut(animationSpec = tween(90)))
                 },
                 label = "screen_transition"
-            ) { state ->
-                when (state) {
+            ) { target ->
+                when (target) {
                     is UiState.Loading -> LoadingScreen()
-                    is UiState.Success -> {
-                        DayList(
-                            entries = state.entries,
-                            onDayClick = { day ->
-                                selectedDay = day
-                                showSheet = true
+                    is UiState.SelectingClass -> ClassSelectionScreen(
+                        classes = target.classes,
+                        onClassSelected = { cls -> viewModel.selectClass(target.u, target.p, cls) }
+                    )
+                    is UiState.NeedsLogin -> LoginScreen(onLogin = viewModel::login)
+                    0 -> { // Substitutions
+                        val state = uiState
+                        if (state is UiState.Success) {
+                            DayList(
+                                entries = state.entries,
+                                onDayClick = { day ->
+                                    selectedDay = day
+                                    showSheet = true
+                                }
+                            )
+                            
+                            if (showSheet && selectedDay != null) {
+                                ModalBottomSheet(
+                                    onDismissRequest = { showSheet = false },
+                                    sheetState = sheetState,
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                    dragHandle = {
+                                        Box(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    scope.launch {
+                                                        if (sheetState.currentValue == SheetValue.PartiallyExpanded) {
+                                                            sheetState.expand()
+                                                        } else {
+                                                            sheetState.partialExpand()
+                                                        }
+                                                    }
+                                                }
+                                                .padding(top = 16.dp, bottom = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            BottomSheetDefaults.DragHandle()
+                                        }
+                                    }
+                                ) {
+                                    val dayEntries = state.entries.filter { it.day == selectedDay }
+                                    val isExpanded = sheetState.targetValue == SheetValue.Expanded
+                                    SubstitutionViewer(
+                                        selectedDay!!, 
+                                        dayEntries, 
+                                        isRoomFirst, 
+                                        isExpanded
+                                    )
+                                }
                             }
-                        )
-                        
-                        if (showSheet && selectedDay != null) {
-                            ModalBottomSheet(
-                                onDismissRequest = { showSheet = false },
-                                sheetState = sheetState,
-                                shape = MaterialTheme.shapes.extraLarge,
-                                dragHandle = { BottomSheetDefaults.DragHandle() }
-                            ) {
-                                val dayEntries = state.entries.filter { it.day == selectedDay }
-                                SubstitutionViewer(selectedDay!!, dayEntries, isRoomFirst)
-                            }
+                        } else if (state is UiState.Error) {
+                            ErrorScreen(state.message, onRetry = { viewModel.fetchData() })
+                        } else {
+                            Box(Modifier.fillMaxSize())
                         }
                     }
-                    is UiState.SelectingClass -> ClassSelectionScreen(
-                        classes = state.classes,
-                        onClassSelected = { cls -> viewModel.selectClass(state.u, state.p, cls) }
-                    )
-                    is UiState.Settings -> SettingsScreen(
+                    1 -> ArchiveScreen(archiveEntries, isRoomFirst, onRemove = viewModel::removeFromArchive)
+                    2 -> SettingsScreen(
                         isRoomFirst = isRoomFirst,
                         sortByPeriod = sortByPeriod,
                         dynamicColor = dynamicColor,
@@ -155,12 +263,47 @@ fun DSBApp(viewModel: MainViewModel) {
                         onToggleDynamic = viewModel::toggleDynamicColor,
                         onChangeClass = viewModel::changeClass,
                         onLogout = viewModel::logout,
-                        onAbout = viewModel::openAbout
+                        onAbout = { /* Archive and Settings already have their screens */ }
                     )
-                    is UiState.About -> AboutScreen()
-                    is UiState.Error -> ErrorScreen(state.message, onRetry = { viewModel.fetchData() })
-                    is UiState.NeedsLogin -> LoginScreen(onLogin = viewModel::login)
-                    is UiState.Idle -> Box(Modifier.fillMaxSize())
+                    else -> Box(Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemove: (SubstitutionEntry) -> Unit) {
+    if (entries.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                Spacer(Modifier.height(16.dp))
+                Text("No archived substitutions", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+    } else {
+        val grouped = entries.groupBy { it.day }
+        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            grouped.forEach { (day, dayEntries) ->
+                item {
+                    Text(day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp))
+                }
+                items(dayEntries) { entry ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
+                    ) {
+                        Column {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                SubstitutionTableRow(entry, isRoomFirst)
+                                IconButton(onClick = { onRemove(entry) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -245,7 +388,7 @@ fun SettingsScreen(
                     SettingItem(
                         title = stringResource(R.string.action_logout),
                         description = stringResource(R.string.desc_logout),
-                        icon = Icons.Default.Logout,
+                        icon = Icons.Filled.Logout,
                         iconColor = MaterialTheme.colorScheme.error,
                         onClick = onLogout
                     )
@@ -589,26 +732,66 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String) -> Unit) {
 }
 
 @Composable
-fun SubstitutionViewer(day: String, entries: List<SubstitutionEntry>, isRoomFirst: Boolean) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Text(text = day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(16.dp))
+fun SubstitutionViewer(
+    day: String, 
+    entries: List<SubstitutionEntry>, 
+    isRoomFirst: Boolean, 
+    isExpanded: Boolean
+) {
+    val headerFontSize by animateFloatAsState(
+        targetValue = if (isExpanded) 36f else 22f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "header_font_size"
+    )
+    val containerPadding by animateDpAsState(
+        targetValue = if (isExpanded) 8.dp else 12.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "container_padding"
+    )
+    val textPaddingStart by animateDpAsState(
+        targetValue = if (isExpanded) 12.dp else 16.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "text_padding_start"
+    )
+    val textPaddingTop by animateDpAsState(
+        targetValue = if (isExpanded) 8.dp else 16.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "text_padding_top"
+    )
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = containerPadding)) {
+        Text(
+            text = day,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontSize = headerFontSize.sp,
+                lineHeight = (headerFontSize * 1.2f).sp
+            ),
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(start = textPaddingStart, top = textPaddingTop, bottom = 16.dp)
+        )
+        
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+            shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
         ) {
-            Row(modifier = Modifier.padding(vertical = 12.dp, horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TableHeaderCell(stringResource(R.string.label_period_short), 1.2f)
+            Row(modifier = Modifier.padding(vertical = 14.dp, horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                TableHeaderCell(stringResource(R.string.label_period_short), 1f)
                 TableHeaderCell(stringResource(R.string.label_subject_short), 1.8f)
                 TableHeaderCell(stringResource(R.string.label_room), 1.4f)
                 TableHeaderCell(stringResource(R.string.label_type), 2f)
             }
         }
-        Spacer(Modifier.height(12.dp))
-        LazyColumn(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 48.dp, start = 8.dp, end = 8.dp)) {
+        
+        Spacer(Modifier.height(16.dp))
+        
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f), 
+            contentPadding = PaddingValues(bottom = 100.dp, start = 8.dp, end = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             items(entries) { entry ->
                 SubstitutionTableRow(entry, isRoomFirst)
-                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(horizontal = 8.dp))
             }
         }
     }
@@ -616,33 +799,80 @@ fun SubstitutionViewer(day: String, entries: List<SubstitutionEntry>, isRoomFirs
 
 @Composable
 fun RowScope.TableHeaderCell(text: String, weight: Float) {
-    Text(text = text, modifier = Modifier.weight(weight), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+    Text(
+        text = text, 
+        modifier = Modifier.weight(weight), 
+        style = MaterialTheme.typography.labelMedium, 
+        fontWeight = FontWeight.ExtraBold, 
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+        letterSpacing = 1.sp
+    )
 }
 
 @Composable
-fun SubstitutionTableRow(entry: SubstitutionEntry, isRoomFirst: Boolean) {
+fun SubstitutionTableRow(
+    entry: SubstitutionEntry, 
+    isRoomFirst: Boolean
+) {
     val roomDisplay = if (isRoomFirst) entry.room else entry.art
     val typeDisplay = if (isRoomFirst) entry.art else entry.room
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp, horizontal = 12.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TableCell(entry.lesson, 1.2f, fontWeight = FontWeight.ExtraBold)
-            TableCell(entry.subject, 1.8f, fontWeight = FontWeight.Bold)
-            TableCell(roomDisplay.ifEmpty { "—" }, 1.4f)
-            TableCell(typeDisplay, 2f, color = MaterialTheme.colorScheme.secondary)
-        }
-        if (entry.text.isNotEmpty()) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.padding(top = 8.dp).fillMaxWidth()
-            ) {
-                Text(text = entry.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp), lineHeight = 18.sp)
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+        )
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TableCell(entry.lesson, 1f, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                TableCell(entry.subject, 1.8f, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                TableCell(roomDisplay.ifEmpty { "—" }, 1.4f, fontWeight = FontWeight.Bold)
+                TableCell(typeDisplay, 2f, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Medium)
+            }
+            
+            if (entry.text.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth()
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Info, 
+                            contentDescription = null, 
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = entry.text, 
+                            style = MaterialTheme.typography.bodyMedium, 
+                            lineHeight = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun RowScope.TableCell(text: String, weight: Float, fontWeight: FontWeight = FontWeight.Normal, color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface) {
-    Text(text = text, modifier = Modifier.weight(weight), style = MaterialTheme.typography.bodyMedium, fontWeight = fontWeight, color = color, maxLines = 2)
+fun RowScope.TableCell(
+    text: String, 
+    weight: Float, 
+    fontWeight: FontWeight = FontWeight.Normal, 
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge
+) {
+    Text(
+        text = text, 
+        modifier = Modifier.weight(weight), 
+        style = style, 
+        fontWeight = fontWeight, 
+        color = color, 
+        maxLines = 2
+    )
 }

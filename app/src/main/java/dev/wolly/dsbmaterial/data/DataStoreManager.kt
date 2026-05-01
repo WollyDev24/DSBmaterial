@@ -20,6 +20,7 @@ class DataStoreManager(private val context: Context) {
         val SWAP_DATA = booleanPreferencesKey("swap_data")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val SORT_PERIOD = booleanPreferencesKey("sort_period")
+        val ARCHIVE = stringPreferencesKey("archive")
     }
 
     val usernameFlow: Flow<String?> = context.dataStore.data.map { it[USERNAME] }
@@ -28,6 +29,7 @@ class DataStoreManager(private val context: Context) {
     val swapDataFlow: Flow<Boolean> = context.dataStore.data.map { it[SWAP_DATA] ?: true }
     val dynamicColorFlow: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val sortPeriodFlow: Flow<Boolean> = context.dataStore.data.map { it[SORT_PERIOD] ?: true }
+    val archiveFlow: Flow<String?> = context.dataStore.data.map { it[ARCHIVE] }
 
     suspend fun saveCredentials(username: String, password: String, className: String) {
         context.dataStore.edit { settings ->
@@ -47,6 +49,10 @@ class DataStoreManager(private val context: Context) {
 
     suspend fun saveSortPreference(enabled: Boolean) {
         context.dataStore.edit { it[SORT_PERIOD] = enabled }
+    }
+
+    suspend fun saveArchive(json: String) {
+        context.dataStore.edit { it[ARCHIVE] = json }
     }
     
     suspend fun clearCredentials() {
