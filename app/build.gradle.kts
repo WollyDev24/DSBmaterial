@@ -15,8 +15,8 @@ android {
         applicationId = "dev.wolly.dsbmaterial"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1-alpha"
+        versionCode = 21
+        versionName = "1.2-alpha"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
