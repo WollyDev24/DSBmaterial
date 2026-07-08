@@ -37,7 +37,7 @@
     <string name="desc_logout">Anmeldedaten entfernen und App zurücksetzen</string>
     <string name="desc_dynamic_color">Farben deines Hintergrundbildes nutzen (Android 12+)</string>
     <string name="desc_sort_period">Ordnet Vertretungen chronologisch</string>
-    <string name="desc_about">Version 1.2-alpha • Entwickelt von WollyDev24</string>
+    <string name="desc_about">Version 1.3 • Entwickelt von WollyDev24</string>
     
     <string name="msg_no_substitutions">Keine Vertretungen gefunden.</string>
     <string name="msg_no_classes">Keine Klassen gefunden. Überprüfe deine Zugangsdaten.</string>

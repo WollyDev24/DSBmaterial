@@ -37,7 +37,7 @@
     <string name="desc_logout">Remove credentials and reset app</string>
     <string name="desc_dynamic_color">Use colors from your wallpaper (Android 12+)</string>
     <string name="desc_sort_period">Orders substitutions chronologically</string>
-    <string name="desc_about">Version 1.2-alpha • Developed by WollyDev24</string>
+    <string name="desc_about">Version 1.3 • Developed by WollyDev24</string>
     <string name="label_demo_mode">Demo Mode</string>
     <string name="label_theme_picker">Theme Color</string>
     <string name="desc_theme_picker">Choose a custom color theme</string>
