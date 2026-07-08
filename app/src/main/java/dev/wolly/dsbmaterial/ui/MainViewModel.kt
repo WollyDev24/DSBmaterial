@@ -10,6 +10,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 sealed class UiState {
     object Idle : UiState()
@@ -39,10 +40,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val sortByPeriod: StateFlow<Boolean> = dataStoreManager.sortPeriodFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val themeIndex: StateFlow<Int> = dataStoreManager.themeIndexFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val navHidden: StateFlow<Boolean> = dataStoreManager.navHiddenFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     private val _archive = MutableStateFlow<List<SubstitutionEntry>>(emptyList())
     val archive: StateFlow<List<SubstitutionEntry>> = _archive
 
     private var lastSuccessEntries: List<SubstitutionEntry> = emptyList()
+    private var isDemoMode = false
 
     init {
         checkCredentialsAndFetch()
@@ -61,9 +69,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun parseDaySortKey(day: String): Long {
+        val dateRegex = Regex("""(\d{2})\.(\d{2})\.(\d{4})""")
+        val match = dateRegex.find(day)
+        if (match != null) {
+            val (d, m, y) = match.destructured
+            return y.toLong() * 10000 + m.toLong() * 100 + d.toLong()
+        }
+        val dayNames = listOf(
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"
+        )
+        val index = dayNames.indexOfFirst { day.lowercase().startsWith(it) }
+        if (index >= 0) return (index % 7).toLong() + 1
+        return Long.MAX_VALUE
+    }
+
     private fun sortArchive(entries: List<SubstitutionEntry>): List<SubstitutionEntry> {
         return entries.sortedWith(
-            compareBy<SubstitutionEntry> { it.day }
+            compareBy<SubstitutionEntry> { parseDaySortKey(it.day) }
                 .thenBy { it.lesson.filter { c -> c.isDigit() }.toIntOrNull() ?: 999 }
         )
     }
@@ -101,6 +125,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedTab.value = index
     }
 
+    fun setThemeIndex(index: Int) {
+        viewModelScope.launch {
+            dataStoreManager.saveThemeIndex(index)
+        }
+    }
+
     fun toggleColumnOrder() {
         viewModelScope.launch {
             dataStoreManager.saveSwapPreference(!isRoomFirst.value)
@@ -110,6 +140,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDynamicColor() {
         viewModelScope.launch {
             dataStoreManager.saveDynamicColorPreference(!dynamicColor.value)
+        }
+    }
+
+    fun toggleNavHidden() {
+        viewModelScope.launch {
+            dataStoreManager.saveNavHiddenPreference(!navHidden.value)
         }
     }
 
@@ -160,6 +196,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun checkCredentialsAndFetch() {
+        if (isDemoMode) {
+            loginDemo()
+            return
+        }
         viewModelScope.launch {
             val username = dataStoreManager.usernameFlow.first()
             val password = dataStoreManager.passwordFlow.first()
@@ -176,8 +216,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun login(username: String, password: String) {
+        isDemoMode = false
         viewModelScope.launch {
             fetchClasses(username, password)
+        }
+    }
+
+    fun loginDemo() {
+        isDemoMode = true
+        _uiState.value = UiState.Loading
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1000)
+            val demoEntries = listOf(
+                SubstitutionEntry("Monday", "Substitution", "10a", "1 - 2", "Math", "R101", "", "", "Teacher sick", ""),
+                SubstitutionEntry("Monday", "Cancellation", "10a", "3", "Physics", "R102", "", "", "", ""),
+                SubstitutionEntry("Tuesday", "Room Change", "10a", "5", "English", "Gym", "", "", "Water damage in R105", ""),
+                SubstitutionEntry("Wednesday", "Substitution", "10a", "4 - 5", "History", "R203", "", "", "", "")
+            )
+            lastSuccessEntries = demoEntries
+            _uiState.value = UiState.Success(sortEntries(demoEntries))
+            archiveSubstitutions(demoEntries)
         }
     }
 
@@ -230,7 +288,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun sortEntries(entries: List<SubstitutionEntry>): List<SubstitutionEntry> {
-        if (!sortByPeriod.value) return entries
-        return entries.sortedBy { it.lesson.filter { c -> c.isDigit() }.toIntOrNull() ?: 999 }
+        val byDay = compareBy<SubstitutionEntry> { parseDaySortKey(it.day) }
+        if (!sortByPeriod.value) return entries.sortedWith(byDay)
+        return entries.sortedWith(
+            byDay.thenBy { it.lesson.filter { c -> c.isDigit() }.toIntOrNull() ?: 999 }
+        )
     }
 }

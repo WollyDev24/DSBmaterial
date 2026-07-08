@@ -21,6 +21,8 @@ class DataStoreManager(private val context: Context) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val SORT_PERIOD = booleanPreferencesKey("sort_period")
         val ARCHIVE = stringPreferencesKey("archive")
+        val THEME_INDEX = androidx.datastore.preferences.core.intPreferencesKey("theme_index")
+        val NAV_HIDDEN = booleanPreferencesKey("nav_hidden")
     }
 
     val usernameFlow: Flow<String?> = context.dataStore.data.map { it[USERNAME] }
@@ -30,6 +32,8 @@ class DataStoreManager(private val context: Context) {
     val dynamicColorFlow: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val sortPeriodFlow: Flow<Boolean> = context.dataStore.data.map { it[SORT_PERIOD] ?: true }
     val archiveFlow: Flow<String?> = context.dataStore.data.map { it[ARCHIVE] }
+    val themeIndexFlow: Flow<Int> = context.dataStore.data.map { it[THEME_INDEX] ?: 0 }
+    val navHiddenFlow: Flow<Boolean> = context.dataStore.data.map { it[NAV_HIDDEN] ?: false }
 
     suspend fun saveCredentials(username: String, password: String, className: String) {
         context.dataStore.edit { settings ->
@@ -47,6 +51,10 @@ class DataStoreManager(private val context: Context) {
         context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
     }
 
+    suspend fun saveThemeIndex(index: Int) {
+        context.dataStore.edit { it[THEME_INDEX] = index }
+    }
+
     suspend fun saveSortPreference(enabled: Boolean) {
         context.dataStore.edit { it[SORT_PERIOD] = enabled }
     }
@@ -55,6 +63,10 @@ class DataStoreManager(private val context: Context) {
         context.dataStore.edit { it[ARCHIVE] = json }
     }
     
+    suspend fun saveNavHiddenPreference(hidden: Boolean) {
+        context.dataStore.edit { it[NAV_HIDDEN] = hidden }
+    }
+
     suspend fun clearCredentials() {
         context.dataStore.edit { it.clear() }
     }

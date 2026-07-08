@@ -38,6 +38,19 @@
     <string name="desc_dynamic_color">Use colors from your wallpaper (Android 12+)</string>
     <string name="desc_sort_period">Orders substitutions chronologically</string>
     <string name="desc_about">Version 1.2-alpha • Developed by WollyDev24</string>
+    <string name="label_demo_mode">Demo Mode</string>
+    <string name="label_theme_picker">Theme Color</string>
+    <string name="desc_theme_picker">Choose a custom color theme</string>
+    <string name="theme_green">DSB Green</string>
+    <string name="theme_blue">Ocean Blue</string>
+    <string name="theme_purple">Deep Purple</string>
+    <string name="theme_red">Ruby Red</string>
+    <string name="theme_orange">Vivid Orange</string>
+    <string name="theme_cyan">Electric Cyan</string>
+    <string name="theme_pink">Rose Pink</string>
+    <string name="label_selected">Selected</string>
+    <string name="label_accent_color">Accent Color</string>
+    <string name="action_apply">Apply</string>
     
     <string name="msg_no_substitutions">No substitutions found.</string>
     <string name="msg_no_classes">No classes found. Check your credentials.</string>
