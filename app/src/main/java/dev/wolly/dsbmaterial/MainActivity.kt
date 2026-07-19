@@ -153,13 +153,13 @@ fun DSBApp(viewModel: MainViewModel) {
 
     val isTablet = isExpandedScreen()
 
-    val showNavCondition by remember(showThemePicker, showAbout, uiState, pagerState.currentPage) {
+    val showNavCondition by remember(showThemePicker, showAbout, showDebug, uiState, pagerState.currentPage) {
         derivedStateOf {
-            !showThemePicker && !showAbout && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
+            !showThemePicker && !showAbout && !showDebug && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
         }
     }
 
-    BackHandler(enabled = showSheet || showThemePicker || showAbout || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
+    BackHandler(enabled = showSheet || showThemePicker || showAbout || showDebug || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
         if (showSheet) {
             if (isTablet) {
                 scope.launch {
@@ -177,6 +177,8 @@ fun DSBApp(viewModel: MainViewModel) {
             showThemePicker = false
         } else if (showAbout) {
             showAbout = false
+        } else if (showDebug) {
+            showDebug = false
         } else if (uiState is UiState.SelectingClass) {
             viewModel.cancelClassSelection()
         } else {
@@ -188,7 +190,7 @@ fun DSBApp(viewModel: MainViewModel) {
         AnimatedVisibility(
             visible = isExpandedScreen() && showNavCondition,
             enter = slideInHorizontally { -it } + fadeIn(tween(300)),
-            exit = slideOutHorizontally { -it } + fadeOut(tween(200))
+            exit = slideOutHorizontally(tween(0)) { -it } + fadeOut(tween(0))
         ) {
             Box(
                 modifier = Modifier
@@ -306,47 +308,6 @@ fun DSBApp(viewModel: MainViewModel) {
                                             showSheet = true
                                         }
                                    )
-                                   
-                                   if (showSheet && selectedDay != null) {
-                                       val dayEntries = currentUiState.entries.filter { it.day == selectedDay }
-                                       if (isTablet) {
-                                            TabletSubstitutionPopup(
-                                                selectedDay = selectedDay!!,
-                                                entries = dayEntries,
-                                                isRoomFirst = isRoomFirst,
-                                                cardRect = cardRect,
-                                                onDismissStart = { isDismissing = true },
-                                                onDismiss = { showSheet = false; selectedDay = null; isDismissing = false }
-                                            )
-                                      } else {
-                                          ModalBottomSheet(
-                                              onDismissRequest = { showSheet = false },
-                                              sheetState = sheetState,
-                                              shape = MaterialTheme.shapes.extraLarge,
-                                              dragHandle = {
-                                                  Box(
-                                                      Modifier
-                                                          .fillMaxWidth()
-                                                          .clickable {
-                                                              scope.launch {
-                                                                  if (sheetState.currentValue == SheetValue.PartiallyExpanded) {
-                                                                      sheetState.expand()
-                                                                  } else {
-                                                                      sheetState.partialExpand()
-                                                                  }
-                                                              }
-                                                          }
-                                                          .padding(top = 16.dp, bottom = 8.dp),
-                                                      contentAlignment = Alignment.Center
-                                                  ) {
-                                                      BottomSheetDefaults.DragHandle()
-                                                  }
-                                              }
-                                          ) {
-                                              SubstitutionViewer(selectedDay!!, dayEntries, isRoomFirst, true)
-                                          }
-                                      }
-                                  }
                             } else if (currentUiState is UiState.Error) {
                                 ErrorScreen(currentUiState.message, onRetry = { viewModel.fetchData() })
                             } else {
@@ -371,6 +332,51 @@ fun DSBApp(viewModel: MainViewModel) {
                         )
                         }
                     }
+                    }
+
+            if (showSheet && selectedDay != null) {
+                val currentState = uiState
+                if (currentState is UiState.Success) {
+                val dayEntries = currentState.entries.filter { it.day == selectedDay }
+                if (isTablet) {
+                    TabletSubstitutionPopup(
+                        selectedDay = selectedDay!!,
+                        entries = dayEntries,
+                        isRoomFirst = isRoomFirst,
+                        cardRect = cardRect,
+                        onDismissStart = { isDismissing = true },
+                        onDismiss = { showSheet = false; selectedDay = null; isDismissing = false }
+                    )
+                } else {
+                    ModalBottomSheet(
+                        onDismissRequest = { showSheet = false },
+                        sheetState = sheetState,
+                        shape = MaterialTheme.shapes.extraLarge,
+                        dragHandle = {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        scope.launch {
+                                            if (sheetState.currentValue == SheetValue.PartiallyExpanded) {
+                                                sheetState.expand()
+                                            } else {
+                                                sheetState.partialExpand()
+                                            }
+                                        }
+                                    }
+                                    .padding(top = 16.dp, bottom = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                BottomSheetDefaults.DragHandle()
+                            }
+                        }
+                    ) {
+                        SubstitutionViewer(selectedDay!!, dayEntries, isRoomFirst, true)
+                    }
+                }
+            }
+            }
 
             OverlayContent(
                 showThemePicker = showThemePicker,
@@ -506,7 +512,6 @@ fun DSBApp(viewModel: MainViewModel) {
             }
         }
     }
-}
 }
 }
 }
