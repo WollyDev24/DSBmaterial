@@ -12,13 +12,33 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
+private fun tintedBackground(primary: Color): Color {
+    return Color(
+        red = primary.red * 0.08f,
+        green = primary.green * 0.08f,
+        blue = primary.blue * 0.08f,
+        alpha = 1f
+    )
+}
+
+private fun tintedSurface(primary: Color): Color {
+    return Color(
+        red = primary.red * 0.12f,
+        green = primary.green * 0.12f,
+        blue = primary.blue * 0.12f,
+        alpha = 1f
+    )
+}
+
 private val DarkColorScheme = darkColorScheme(
     primary = md_theme_dark_primary,
     onPrimary = md_theme_dark_onPrimary,
     primaryContainer = md_theme_dark_primaryContainer,
     onPrimaryContainer = md_theme_dark_onPrimaryContainer,
     secondary = md_theme_dark_secondary,
-    onSecondary = md_theme_dark_onSecondary
+    onSecondary = md_theme_dark_onSecondary,
+    background = tintedBackground(md_theme_dark_primary),
+    surface = tintedSurface(md_theme_dark_primary)
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -30,6 +50,15 @@ private val LightColorScheme = lightColorScheme(
     onSecondary = md_theme_light_onSecondary
 )
 
+private fun tintedSurfaceVariant(primary: Color): Color {
+    return Color(
+        red = primary.red * 0.16f,
+        green = primary.green * 0.16f,
+        blue = primary.blue * 0.16f,
+        alpha = 1f
+    )
+}
+
 private fun createDarkTheme(
     primary: Color,
     onPrimary: Color,
@@ -37,9 +66,8 @@ private fun createDarkTheme(
     onPrimaryContainer: Color,
     secondary: Color,
 ): ColorScheme {
-    val background = Color(0xFF0E0E10)
-    val surface = Color(0xFF0E0E10)
-    val surfaceVariant = Color(0xFF49454F)
+    val background = tintedBackground(primary)
+    val surface = tintedSurface(primary)
 
     return darkColorScheme(
         primary = primary,
@@ -56,7 +84,7 @@ private fun createDarkTheme(
         onTertiaryContainer = onPrimaryContainer,
         surface = surface,
         onSurface = Color(0xFFE3E2E6),
-        surfaceVariant = surfaceVariant,
+        surfaceVariant = tintedSurfaceVariant(primary),
         onSurfaceVariant = Color(0xFFC4C6D0),
         outline = primary.copy(alpha = 0.5f),
         outlineVariant = primary.copy(alpha = 0.3f),

@@ -5,6 +5,9 @@ import android.util.Log
 import dev.wolly.dsbmaterial.data.PlanInfo
 import dev.wolly.dsbmaterial.data.SubstitutionEntry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.JavaNetCookieJar
@@ -32,6 +35,8 @@ class DSBMobileAPI(private val username: String, private val password: String) {
     
     private val client = OkHttpClient.Builder()
         .cookieJar(JavaNetCookieJar(cookieManager))
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     private suspend fun webLogin(): Boolean = withContext(Dispatchers.IO) {
@@ -164,36 +169,37 @@ class DSBMobileAPI(private val username: String, private val password: String) {
 
     suspend fun getSubstitutions(classFilter: String = ""): List<SubstitutionEntry> = withContext(Dispatchers.IO) {
         val plans = getPlans()
-        val entries = mutableListOf<SubstitutionEntry>()
+        val htmlPlans = plans.filter { it.isHtml }
 
-        for (plan in plans) {
-            if (!plan.isHtml) continue
-            try {
-                val request = Request.Builder().url(plan.url).build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) continue
-                
-                val contentType = response.header("Content-Type", "")
-                if (contentType?.contains("image") == true) continue
-
-                val bytes = response.body?.bytes() ?: continue
-                
-                // Try UTF-8 first, then Windows-1252 (often used by school software)
-                var html: String? = null
-                for (encoding in listOf("utf-8", "cp1252", "iso-8859-1", "latin-1")) {
+        val entries = coroutineScope {
+            htmlPlans.map { plan ->
+                async {
                     try {
-                        val decoder = charset(encoding).newDecoder()
-                        html = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-                        break
-                    } catch (e: Exception) { continue }
+                        val request = Request.Builder().url(plan.url).build()
+                        val response = client.newCall(request).execute()
+                        if (!response.isSuccessful) return@async emptyList()
+                        
+                        val contentType = response.header("Content-Type", "")
+                        if (contentType?.contains("image") == true) return@async emptyList()
+
+                        val bytes = response.body?.bytes() ?: return@async emptyList()
+                        
+                        var html: String? = null
+                        for (encoding in listOf("utf-8", "cp1252", "iso-8859-1", "latin-1")) {
+                            try {
+                                val decoder = charset(encoding).newDecoder()
+                                html = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                                break
+                            } catch (e: Exception) { continue }
+                        }
+                        
+                        if (html != null) parsePlanHtml(html, classFilter) else emptyList()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to fetch plan ${plan.url}", e)
+                        emptyList()
+                    }
                 }
-                
-                if (html != null) {
-                    entries.addAll(parsePlanHtml(html, classFilter))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to fetch plan ${plan.url}", e)
-            }
+            }.awaitAll().flatten()
         }
         return@withContext mergeSubstitutionEntries(entries)
     }

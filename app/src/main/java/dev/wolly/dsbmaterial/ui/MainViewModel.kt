@@ -1,6 +1,8 @@
 package dev.wolly.dsbmaterial.ui
 
 import android.app.Application
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.wolly.dsbmaterial.api.DSBMobileAPI
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
+@Stable
 sealed class UiState {
     object Idle : UiState()
     object Loading : UiState()

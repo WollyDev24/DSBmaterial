@@ -1,6 +1,7 @@
 package dev.wolly.dsbmaterial
 
 import android.os.Bundle
+import dev.wolly.dsbmaterial.BuildConfig
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -62,8 +63,15 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.PI
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -104,6 +112,21 @@ fun DSBApp(viewModel: MainViewModel) {
     var isDismissing by remember { mutableStateOf(false) }
     var showThemePicker by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var showDebug by remember { mutableStateOf(false) }
+    var collapseFraction by remember { mutableFloatStateOf(0f) }
+
+    val scrollTrackerConnection = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0f) {
+                    collapseFraction = (collapseFraction + kotlin.math.abs(available.y) / 150f).coerceIn(0f, 1f)
+                } else if (available.y > 0f) {
+                    collapseFraction = (collapseFraction - available.y / 150f).coerceIn(0f, 1f)
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     val cardAlpha by animateFloatAsState(
         targetValue = when {
@@ -130,6 +153,12 @@ fun DSBApp(viewModel: MainViewModel) {
 
     val isTablet = isExpandedScreen()
 
+    val showNavCondition by remember(showThemePicker, showAbout, uiState, pagerState.currentPage) {
+        derivedStateOf {
+            !showThemePicker && !showAbout && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
+        }
+    }
+
     BackHandler(enabled = showSheet || showThemePicker || showAbout || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
         if (showSheet) {
             if (isTablet) {
@@ -155,7 +184,6 @@ fun DSBApp(viewModel: MainViewModel) {
         }
     }
 
-    val showNavCondition = !showThemePicker && !showAbout && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
     Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         AnimatedVisibility(
             visible = isExpandedScreen() && showNavCondition,
@@ -203,25 +231,34 @@ fun DSBApp(viewModel: MainViewModel) {
 
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             Scaffold(
+            modifier = Modifier.fillMaxSize(),
             topBar = {
                 if (!showAbout && uiState !is UiState.NeedsLogin) {
-                    TopAppBar(
-                        title = { 
-                            Text(
-                                when {
-                                    showThemePicker -> stringResource(R.string.label_theme_picker)
-                                    pagerState.currentPage == 1 -> stringResource(R.string.label_archive)
-                                    pagerState.currentPage == 2 -> stringResource(R.string.title_settings)
-                                    else -> stringResource(R.string.title_main)
-                                },
-                                fontWeight = FontWeight.ExtraBold
-                            ) 
+                    CollapsingTopBar(
+                        title = when {
+                            showThemePicker -> stringResource(R.string.label_theme_picker)
+                            pagerState.currentPage == 1 -> stringResource(R.string.label_archive)
+                            pagerState.currentPage == 2 -> stringResource(R.string.title_settings)
+                            else -> stringResource(R.string.title_main)
                         },
+                        collapseFraction = collapseFraction,
                         actions = {
                             if (!showThemePicker) {
                                 if (pagerState.currentPage == 0 && (uiState is UiState.Success || uiState is UiState.Idle)) {
+                                    val isRefreshing = uiState is UiState.Loading
+                                    val refreshRotation by animateFloatAsState(
+                                        targetValue = if (isRefreshing) 360f else 0f,
+                                        animationSpec = if (isRefreshing) infiniteRepeatable(
+                                            animation = tween(1000, easing = LinearEasing)
+                                        ) else tween(0),
+                                        label = "refresh_rotation"
+                                    )
                                     IconButton(onClick = { viewModel.fetchData() }) {
-                                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = stringResource(R.string.action_refresh),
+                                            modifier = Modifier.rotate(refreshRotation)
+                                        )
                                     }
                                 } else if (pagerState.currentPage == 1 && archiveEntries.isNotEmpty()) {
                                     IconButton(onClick = { viewModel.clearArchive() }) {
@@ -254,16 +291,7 @@ fun DSBApp(viewModel: MainViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 beyondViewportPageCount = 1
             ) { page ->
-                AnimatedContent(
-                    targetState = page,
-                    transitionSpec = {
-                        val direction = if (targetState > initialState) 1 else -1
-                        (slideInHorizontally { width -> width * direction } + fadeIn(tween(300)))
-                            .togetherWith(slideOutHorizontally { width -> -width * direction } + fadeOut(tween(250)))
-                    },
-                    label = "page_transition"
-                ) { currentPage ->
-                    when (currentPage) {
+                    when (page) {
                      0 -> { // Substitutions
                               val currentUiState = uiState
                               if (currentUiState is UiState.Success) {
@@ -271,6 +299,7 @@ fun DSBApp(viewModel: MainViewModel) {
                                         entries = currentUiState.entries,
                                         selectedDay = selectedDay,
                                         cardAlpha = cardAlpha,
+                                        modifier = Modifier.nestedScroll(scrollTrackerConnection),
                                         onDayClick = { day, bounds ->
                                             selectedDay = day
                                             cardRect = bounds
@@ -324,7 +353,7 @@ fun DSBApp(viewModel: MainViewModel) {
                                 Box(Modifier.fillMaxSize())
                             }
                         }
-                        1 -> ArchiveScreen(archiveEntries, isRoomFirst, onRemove = viewModel::removeFromArchive)
+                        1 -> ArchiveScreen(archiveEntries, isRoomFirst, onRemove = viewModel::removeFromArchive, modifier = Modifier.nestedScroll(scrollTrackerConnection))
                         2 -> SettingsScreen(
                             isRoomFirst = isRoomFirst,
                             sortByPeriod = sortByPeriod,
@@ -337,21 +366,24 @@ fun DSBApp(viewModel: MainViewModel) {
                             onOpenThemePicker = { showThemePicker = true },
                             onChangeClass = viewModel::changeClass,
                             onLogout = viewModel::logout,
-                            onAbout = { showAbout = true }
+                            onAbout = { showAbout = true },
+                            modifier = Modifier.nestedScroll(scrollTrackerConnection)
                         )
                         }
                     }
-                }
 
             OverlayContent(
                 showThemePicker = showThemePicker,
                 showAbout = showAbout,
+                showDebug = showDebug,
                 uiState = uiState,
                 themeIndex = themeIndex,
                 dynamicColor = dynamicColor,
                 onSelectTheme = { viewModel.setThemeIndex(it) },
                 onCloseThemePicker = { showThemePicker = false },
                 onCloseAbout = { showAbout = false },
+                onOpenDebug = { showAbout = false; showDebug = true },
+                onCloseDebug = { showDebug = false },
                 onSelectClass = { u, p, cls -> viewModel.selectClass(u, p, cls) },
                 onLogin = viewModel::login,
                 onLoginDemo = viewModel::loginDemo
@@ -402,7 +434,6 @@ fun DSBApp(viewModel: MainViewModel) {
                     .height(dp(72.dp, 88.dp)),
                     shape = RoundedCornerShape(36.dp),
                     color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 8.dp,
                     shadowElevation = 12.dp,
                     border = BorderStroke(
                         0.5.dp,
@@ -440,10 +471,16 @@ fun DSBApp(viewModel: MainViewModel) {
                                 Icons.Rounded.Settings to R.string.title_settings
                             )
                             items.forEachIndexed { index, (icon, labelRes) ->
+                                val isSelected = pagerState.currentPage == index
                                 val scale by animateFloatAsState(
-                                    targetValue = if (pagerState.currentPage == index) 1.25f else 1f,
+                                    targetValue = if (isSelected) 1.25f else 1f,
                                     animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
                                     label = "nav_scale_$index"
+                                )
+                                val iconTint by animateColorAsState(
+                                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    animationSpec = tween(300),
+                                    label = "nav_icon_tint_$index"
                                 )
                                 Box(
                                     modifier = Modifier
@@ -460,7 +497,7 @@ fun DSBApp(viewModel: MainViewModel) {
                                     Icon(
                                         icon,
                                         contentDescription = stringResource(labelRes),
-                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        tint = iconTint,
                                         modifier = Modifier.size(26.dp).graphicsLayer(scaleX = scale, scaleY = scale)
                         )
                         }
@@ -773,7 +810,6 @@ private fun ThemeSwatchItem(
             ) { onSelect(index) },
         contentAlignment = Alignment.Center
     ) {
-        val surface = MaterialTheme.colorScheme.surface
         Box(modifier = Modifier.fillMaxSize().drawBehind {
             val s = size
             clipPath(Path().apply { addOval(Rect(Offset.Zero, s)) }) {
@@ -788,13 +824,13 @@ private fun ThemeSwatchItem(
                 }
                 if (indicatorScale > 0f) {
                     drawCircle(
-                        color = surface,
-                        radius = s.minDimension / 2f * indicatorScale,
-                        style = Stroke(width = 3.dp.toPx())
+                        color = Color.Black.copy(alpha = 0.4f * indicatorScale),
+                        radius = s.minDimension / 2f * indicatorScale
                     )
+                    val r = s.minDimension / 2f * 0.3f * indicatorScale
                     drawCircle(
-                        color = theme.primaryContainer,
-                        radius = s.minDimension / 2f * 0.55f * indicatorScale
+                        color = Color.White,
+                        radius = r
                     )
                 }
             }
@@ -803,7 +839,7 @@ private fun ThemeSwatchItem(
 }
 
 @Composable
-fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemove: (SubstitutionEntry) -> Unit) {
+fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemove: (SubstitutionEntry) -> Unit, modifier: Modifier = Modifier) {
     if (entries.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             androidx.compose.animation.AnimatedVisibility(
@@ -819,7 +855,7 @@ fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemo
         }
     } else {
         val grouped = entries.groupBy { it.day }
-        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             grouped.forEach { (day, dayEntries) ->
                 item {
                     Text(day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp).animateItem(fadeInSpec = tween(500)))
@@ -828,7 +864,7 @@ fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemo
                     Card(
         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.extraLarge,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
                     ) {
                         Column {
                             Row(modifier = Modifier.padding(dp(20.dp, 28.dp)), verticalAlignment = Alignment.CenterVertically) {
@@ -861,10 +897,11 @@ fun SettingsScreen(
     onOpenThemePicker: () -> Unit,
     onChangeClass: () -> Unit,
     onLogout: () -> Unit,
-    onAbout: () -> Unit
+    onAbout: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -885,28 +922,32 @@ fun SettingsScreen(
                             title = stringResource(R.string.action_swap_data),
                             description = if (isRoomFirst) stringResource(R.string.desc_swap_default) else stringResource(R.string.desc_swap_active),
                             icon = Icons.Default.SwapHoriz,
-                            trailing = { Switch(checked = !isRoomFirst, onCheckedChange = { onToggleOrder() }) }
+                            isActive = !isRoomFirst,
+                            trailing = { ExpressiveSwitch(checked = !isRoomFirst, onCheckedChange = { onToggleOrder() }) }
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
                         SettingItem(
                             title = stringResource(R.string.label_sort_period),
                             description = stringResource(R.string.desc_sort_period),
                             icon = Icons.Default.Sort,
-                            trailing = { Switch(checked = sortByPeriod, onCheckedChange = { onToggleSort() }) }
+                            isActive = sortByPeriod,
+                            trailing = { ExpressiveSwitch(checked = sortByPeriod, onCheckedChange = { onToggleSort() }) }
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
                         SettingItem(
                             title = stringResource(R.string.label_dynamic_color),
                             description = stringResource(R.string.desc_dynamic_color),
                             icon = Icons.Default.Palette,
-                            trailing = { Switch(checked = dynamicColor, onCheckedChange = { onToggleDynamic() }) }
+                            isActive = dynamicColor,
+                            trailing = { ExpressiveSwitch(checked = dynamicColor, onCheckedChange = { onToggleDynamic() }) }
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
                         SettingItem(
                             title = "Minimal Nav Bar",
                             description = "Show dots instead of the nav bar",
                             icon = Icons.Default.Circle,
-                            trailing = { Switch(checked = navHidden, onCheckedChange = { onToggleNavHidden() }) }
+                            isActive = navHidden,
+                            trailing = { ExpressiveSwitch(checked = navHidden, onCheckedChange = { onToggleNavHidden() }) }
                         )
                         if (!dynamicColor) {
                             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
@@ -973,7 +1014,7 @@ fun SettingCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) 
     Surface(
         modifier = Modifier.fillMaxWidth().animateContentSize().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
         content = content
     )
 }
@@ -984,9 +1025,22 @@ fun SettingItem(
     description: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     iconColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    isActive: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
+    val animatedIconBg by animateColorAsState(
+        targetValue = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                      else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        animationSpec = tween(300),
+        label = "setting_icon_bg"
+    )
+    val animatedIconTint by animateColorAsState(
+        targetValue = if (isActive) MaterialTheme.colorScheme.primary
+                      else iconColor,
+        animationSpec = tween(300),
+        label = "setting_icon_tint"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -997,10 +1051,10 @@ fun SettingItem(
         Surface(
             modifier = Modifier.size(48.dp),
             shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            color = animatedIconBg
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = iconColor)
+                Icon(icon, contentDescription = null, tint = animatedIconTint)
             }
         }
         Spacer(Modifier.width(16.dp))
@@ -1013,7 +1067,16 @@ fun SettingItem(
 }
 
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onBack: () -> Unit, onDebugTap: () -> Unit = {}) {
+    var tapCount by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(tapCount) {
+        if (tapCount >= 7) {
+            tapCount = 0
+            onDebugTap()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -1068,6 +1131,22 @@ fun AboutScreen(onBack: () -> Unit) {
                     )
                 }
             }
+            Spacer(Modifier.height(24.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { tapCount++ }
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    "v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            }
         }
         IconButton(
             onClick = onBack,
@@ -1078,22 +1157,144 @@ fun AboutScreen(onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DebugModeScreen(onBack: () -> Unit) {
+    var showLoading by remember { mutableStateOf(false) }
+    var showError by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            TopAppBar(
+                title = { Text("Debug Mode", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
+            HorizontalDivider(thickness = 0.5.dp)
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                item {
+                    Text("Animations", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+                }
+                item {
+                    SettingCard(onClick = { showLoading = !showLoading }) {
+                        SettingItem(
+                            title = "Loading Animation",
+                            description = if (showLoading) "Tap to hide" else "Tap to preview the loading screen",
+                            icon = Icons.Default.Info
+                        )
+                    }
+                }
+                item {
+                    SettingCard(onClick = { showError = !showError }) {
+                        SettingItem(
+                            title = "Error Screen",
+                            description = if (showError) "Tap to hide" else "Tap to preview the error screen",
+                            icon = Icons.Default.Warning
+                        )
+                    }
+                }
+                item {
+                    Text("Components", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+                }
+                item {
+                    var switchState by remember { mutableStateOf(true) }
+                    SettingCard(onClick = { switchState = !switchState }) {
+                        SettingItem(
+                            title = "Expressive Switch",
+                            description = "Interactive toggle preview",
+                            icon = Icons.Default.Settings,
+                            trailing = { ExpressiveSwitch(checked = switchState, onCheckedChange = { switchState = !switchState }) }
+                        )
+                    }
+                }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        shape = MaterialTheme.shapes.large,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Type Badges", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                listOf("Entfall" to Color(0xFFD32F2F), "Vertretung" to Color(0xFFFFA000), "Verlegung" to Color(0xFF1976D2), "Eigenvertretung" to Color(0xFF7B1FA2)).forEach { (label, color) ->
+                                    Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.15f)) {
+                                        Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                listOf("Betreuung" to Color(0xFF388E3C), "Raumänderung" to Color(0xFF00796B)).forEach { (label, color) ->
+                                    Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.15f)) {
+                                        Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        shape = MaterialTheme.shapes.large,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Typography Scale", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text("Headline Large", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                            Text("Title Medium", style = MaterialTheme.typography.titleMedium)
+                            Text("Body Large", style = MaterialTheme.typography.bodyLarge)
+                            Text("Body Medium", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Label Small", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                item { Spacer(Modifier.height(32.dp)) }
+            }
+        }
+        if (showLoading) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable { showLoading = false }) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Surface(modifier = Modifier.size(200.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
+                        LoadingScreen()
+                    }
+                }
+            }
+        }
+        if (showError) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable { showError = false }) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Surface(modifier = Modifier.size(300.dp, 200.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
+                        ErrorScreen(message = "This is a debug error message for testing.", onRetry = { showError = false })
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun OverlayContent(
     showThemePicker: Boolean,
     showAbout: Boolean,
+    showDebug: Boolean,
     uiState: UiState,
     themeIndex: Int,
     dynamicColor: Boolean,
     onSelectTheme: (Int) -> Unit,
     onCloseThemePicker: () -> Unit,
     onCloseAbout: () -> Unit,
+    onOpenDebug: () -> Unit,
+    onCloseDebug: () -> Unit,
     onSelectClass: (String, String, String) -> Unit,
     onLogin: (String, String) -> Unit,
     onLoginDemo: () -> Unit
 ) {
     androidx.compose.animation.AnimatedVisibility(
-        visible = showThemePicker || showAbout || uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass,
+        visible = showThemePicker || showAbout || showDebug || uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass,
         enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.92f, animationSpec = tween(300)),
         exit = fadeOut(tween(250)) + scaleOut(targetScale = 0.92f, animationSpec = tween(250))
     ) {
@@ -1104,7 +1305,8 @@ fun OverlayContent(
                 onSelect = onSelectTheme,
                 onBack = onCloseThemePicker
             )
-            showAbout -> AboutScreen(onBack = onCloseAbout)
+            showAbout -> AboutScreen(onBack = onCloseAbout, onDebugTap = onOpenDebug)
+            showDebug -> DebugModeScreen(onBack = onCloseDebug)
             uiState is UiState.Loading -> LoadingScreen()
             uiState is UiState.SelectingClass -> {
                 val s = uiState
@@ -1121,32 +1323,67 @@ fun OverlayContent(
 @Composable
 fun LoadingScreen() {
     val infiniteTransition = rememberInfiniteTransition(label = "loading")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(animation = tween(1500, easing = LinearEasing)),
-        label = "rotation"
-    )
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(animation = tween(1000, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
-        label = "scale"
-    )
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Surface(
-            modifier = Modifier.size(100.dp).graphicsLayer {
-                rotationZ = rotation
-                scaleX = scale
-                scaleY = scale
-            },
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = MaterialTheme.shapes.extraLarge
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                repeat(3) { index ->
+                    val bounce by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 0f,
+                        animationSpec = infiniteRepeatable(
+                            animation = keyframes {
+                                durationMillis = 1200
+                                0f at 0 using FastOutSlowInEasing
+                                -20f at 200 using FastOutSlowInEasing
+                                0f at 400 using FastOutSlowInEasing
+                                0f at 1200
+                            },
+                            repeatMode = RepeatMode.Restart,
+                            initialStartOffset = StartOffset(index * 150)
+                        ),
+                        label = "bounce_$index"
+                    )
+                    val dotScale by infiniteTransition.animateFloat(
+                        initialValue = 0.8f,
+                        targetValue = 0.8f,
+                        animationSpec = infiniteRepeatable(
+                            animation = keyframes {
+                                durationMillis = 1200
+                                0.8f at 0 using FastOutSlowInEasing
+                                1.2f at 200 using FastOutSlowInEasing
+                                0.8f at 400 using FastOutSlowInEasing
+                                0.8f at 1200
+                            },
+                            repeatMode = RepeatMode.Restart,
+                            initialStartOffset = StartOffset(index * 150)
+                        ),
+                        label = "dot_scale_$index"
+                    )
+                    val dotColor by animateColorAsState(
+                        targetValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f + (index * 0.35f)),
+                        animationSpec = tween(300),
+                        label = "dot_color_$index"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .graphicsLayer {
+                                translationY = bounce
+                                scaleX = dotScale
+                                scaleY = dotScale
+                            }
+                            .clip(CircleShape)
+                            .background(dotColor)
+                    )
+                }
             }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                stringResource(R.string.msg_loading),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1334,14 +1571,22 @@ fun ClassSelectionScreen(classes: List<String>, onClassSelected: (String) -> Uni
 }
 
 @Composable
-fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit, selectedDay: String? = null, cardAlpha: Float = 1f) {
-    val days = remember(entries) {
-        entries.map { it.day }.distinct().filter { day ->
-            val lowerDay = day.lowercase()
+fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit, selectedDay: String? = null, cardAlpha: Float = 1f, modifier: Modifier = Modifier) {
+    val dayData = remember(entries) {
+        val filtered = entries.filter { day ->
+            val lowerDay = day.day.lowercase()
             !lowerDay.contains("samstag") && !lowerDay.contains("sonntag") &&
             !lowerDay.contains("saturday") && !lowerDay.contains("sunday")
         }
+        val distinctDays = filtered.map { it.day }.distinct()
+        val counts = mutableMapOf<String, Int>()
+        for (entry in filtered) {
+            counts[entry.day] = (counts[entry.day] ?: 0) + 1
+        }
+        distinctDays to counts
     }
+    val days = dayData.first
+    val dayCounts = dayData.second
     
     if (days.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1349,13 +1594,13 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit
         }
     } else {
         val isTablet = isExpandedScreen()
-        val pad = PaddingValues(dp(20.dp, 20.dp))
-        val spacing = if (isTablet) 16.dp else 24.dp
+        val pad = remember(isTablet) { PaddingValues(if (isTablet) 20.dp else 20.dp) }
+        val spacing = remember(isTablet) { if (isTablet) 16.dp else 24.dp }
 
         if (isTablet) {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(280.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = modifier.fillMaxSize(),
                 contentPadding = pad,
                 horizontalArrangement = Arrangement.spacedBy(spacing),
                 verticalArrangement = Arrangement.spacedBy(spacing)
@@ -1373,7 +1618,7 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit
                         contentAlignment = Alignment.TopStart
                     ) {
                         StaggeredFadeIn(index) {
-                            DayCard(day, entries.count { it.day == day }) {
+                            DayCard(day, dayCounts[day] ?: 0) {
                                 if (!isOrigin) onDayClick(day, cardBounds.value)
                             }
                         }
@@ -1382,11 +1627,11 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit
                 item { Spacer(Modifier.height(120.dp)) }
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = pad, verticalArrangement = Arrangement.spacedBy(spacing)) {
+            LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = pad, verticalArrangement = Arrangement.spacedBy(spacing)) {
                 itemsIndexed(days, key = { _, it -> it }) { index, day ->
                     StaggeredFadeIn(index) {
                         Box(modifier = Modifier.animateItem(fadeInSpec = tween(500))) {
-                            DayCard(day, entries.count { it.day == day }) { onDayClick(day, Rect(0f, 0f, 0f, 0f)) }
+                            DayCard(day, dayCounts[day] ?: 0) { onDayClick(day, Rect(0f, 0f, 0f, 0f)) }
                         }
                     }
                 }
@@ -1399,10 +1644,30 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit
 @Composable
 private fun DayCard(day: String, count: Int, onDayClick: (String) -> Unit) {
     val isTablet = isExpandedScreen()
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "daycard_press_scale"
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (isPressed) 1.dp else 4.dp,
+        animationSpec = tween(200),
+        label = "daycard_elevation"
+    )
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().graphicsLayer {
+            scaleX = pressScale
+            scaleY = pressScale
+        },
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isPressed) 0.12f else 0.08f)),
+        interactionSource = interactionSource,
+        onClick = { }
     ) {
         Column(modifier = Modifier.padding(dp(16.dp, 24.dp))) {
             Text(text = day, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
@@ -1467,7 +1732,7 @@ fun SubstitutionViewer(
         )
         
         Surface(
-            color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
             shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
         ) {
@@ -1598,7 +1863,7 @@ fun SubstitutionTableRow(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
         )
     ) {
         SubstitutionTableRowContent(entry, isRoomFirst)
@@ -1618,7 +1883,37 @@ fun SubstitutionTableRowContent(
             TableCell(entry.lesson, 1f, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
             TableCell(entry.subject, 1.8f, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
             TableCell(roomDisplay.ifEmpty { "—" }, 1.4f, fontWeight = FontWeight.Bold)
-            TableCell(typeDisplay, 2f, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Medium)
+            val defaultTypeColor = MaterialTheme.colorScheme.secondary
+            val typeColor = remember(typeDisplay, defaultTypeColor) {
+                val lower = typeDisplay.lowercase()
+                when {
+                    lower.contains("entfall") -> Color(0xFFD32F2F)
+                    lower.contains("vertretung") -> Color(0xFFF57C00)
+                    lower.contains("verlegung") || lower.contains("verschiebung") -> Color(0xFF1976D2)
+                    lower.contains("eigenvertretung") -> Color(0xFF7B1FA2)
+                    lower.contains("betreuung") -> Color(0xFF388E3C)
+                    lower.contains("raumänderung") || lower.contains("raum") -> Color(0xFF00838F)
+                    else -> defaultTypeColor
+                }
+            }
+            val typeBgColor = typeColor.copy(alpha = 0.12f)
+            Box(
+                modifier = Modifier
+                    .weight(2f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(typeBgColor)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = typeDisplay,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = typeColor,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
         }
 
         if (entry.text.isNotEmpty()) {
@@ -1676,7 +1971,128 @@ fun StaggeredFadeIn(index: Int, delayMs: Int = 80, content: @Composable () -> Un
 }
 
 @Composable
-private fun isExpandedScreen(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
+private fun isExpandedScreen(): Boolean {
+    val configuration = LocalConfiguration.current
+    return remember(configuration) { configuration.screenWidthDp >= 600 }
+}
 
 @Composable
-private fun dp(compact: Dp, expanded: Dp): Dp = if (isExpandedScreen()) expanded else compact
+private fun dp(compact: Dp, expanded: Dp): Dp {
+    val isExpanded = isExpandedScreen()
+    return remember(isExpanded, compact, expanded) { if (isExpanded) expanded else compact }
+}
+
+@Composable
+fun CollapsingTopBar(
+    title: String,
+    collapseFraction: Float,
+    actions: @Composable RowScope.() -> Unit = {}
+) {
+    val expandedHeight = 64.dp
+    val collapsedHeight = 48.dp
+    val expandFraction = 1f - collapseFraction.coerceIn(0f, 1f)
+    val currentHeight = ((expandedHeight.value * expandFraction) + (collapsedHeight.value * (1f - expandFraction))).dp
+    val currentFontSize = 34f * expandFraction + 20f * (1f - expandFraction)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(currentHeight)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                fontSize = currentFontSize.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                content = actions
+            )
+        }
+    }
+}
+
+@Composable
+fun ExpressiveSwitch(
+    checked: Boolean,
+    onCheckedChange: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val thumbOffset by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "thumb_offset"
+    )
+    val bgColor by animateColorAsState(
+        targetValue = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        animationSpec = tween(300),
+        label = "bg_color"
+    )
+    val thumbScale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessVeryLow
+        ),
+        label = "thumb_scale"
+    )
+    val iconAlpha by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(200),
+        label = "icon_alpha"
+    )
+    val trackWidth = 56.dp
+    val trackHeight = 32.dp
+    val thumbSize = 24.dp
+    val padding = 4.dp
+
+    Box(
+        modifier = modifier
+            .size(trackWidth, trackHeight)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bgColor)
+            .clickable { onCheckedChange() },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        val thumbX by animateDpAsState(
+            targetValue = if (checked) trackWidth - thumbSize - padding else padding,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium
+            ),
+            label = "thumb_x"
+        )
+        Box(
+            modifier = Modifier
+                .offset(x = thumbX)
+                .size(thumbSize)
+                .graphicsLayer {
+                    scaleX = thumbScale
+                    scaleY = thumbScale
+                }
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.95f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                if (checked) Icons.Default.Check else Icons.Default.Close,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp).alpha(iconAlpha),
+                tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+            )
+        }
+    }
+}

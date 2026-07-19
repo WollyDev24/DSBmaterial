@@ -15,15 +15,16 @@ android {
         applicationId = "dev.wolly.dsbmaterial"
         minSdk = 28
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.3"
+        versionCode = 30
+        versionName = "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -36,6 +37,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
