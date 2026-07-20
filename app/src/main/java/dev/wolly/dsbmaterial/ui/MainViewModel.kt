@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.wolly.dsbmaterial.DSBWidget
 import dev.wolly.dsbmaterial.api.DSBMobileAPI
 import dev.wolly.dsbmaterial.data.DataStoreManager
 import dev.wolly.dsbmaterial.data.SubstitutionEntry
@@ -34,6 +35,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
     val isRoomFirst: StateFlow<Boolean> = dataStoreManager.swapDataFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
@@ -49,8 +53,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val navHidden: StateFlow<Boolean> = dataStoreManager.navHiddenFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    val useCustomFont: StateFlow<Boolean> = dataStoreManager.useCustomFontFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val fontWeight: StateFlow<Float> = dataStoreManager.fontWeightFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 400f)
+
+    val fontWidth: StateFlow<Float> = dataStoreManager.fontWidthFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 100f)
+
+    val fontOpsz: StateFlow<Float> = dataStoreManager.fontOpszFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 14f)
+
+    val fontSlnt: StateFlow<Float> = dataStoreManager.fontSlntFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    val fontGrad: StateFlow<Float> = dataStoreManager.fontGradFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    val fontRond: StateFlow<Float> = dataStoreManager.fontRondFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
     private val _archive = MutableStateFlow<List<SubstitutionEntry>>(emptyList())
     val archive: StateFlow<List<SubstitutionEntry>> = _archive
+
+    private val _selectedClasses = MutableStateFlow<List<String>>(emptyList())
+    val selectedClasses: StateFlow<List<String>> = _selectedClasses
 
     private var lastSuccessEntries: List<SubstitutionEntry> = emptyList()
     private var isDemoMode = false
@@ -58,6 +86,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         checkCredentialsAndFetch()
         loadArchive()
+        loadSelectedClasses()
     }
 
     private fun loadArchive() {
@@ -67,6 +96,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val type = object : TypeToken<List<SubstitutionEntry>>() {}.type
                     val entries: List<SubstitutionEntry> = gson.fromJson(json, type)
                     _archive.value = sortArchive(entries)
+                }
+            }
+        }
+    }
+
+    private fun loadSelectedClasses() {
+        viewModelScope.launch {
+            dataStoreManager.selectedClassesFlow.collect { json ->
+                if (!json.isNullOrEmpty()) {
+                    _selectedClasses.value = json.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 }
             }
         }
@@ -105,6 +144,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val sortedArchive = sortArchive(newArchive)
                 _archive.value = sortedArchive
                 dataStoreManager.saveArchive(gson.toJson(sortedArchive))
+                updateWidget()
             }
         }
     }
@@ -114,6 +154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val newArchive = _archive.value.filter { it != entry }
             _archive.value = newArchive
             dataStoreManager.saveArchive(gson.toJson(newArchive))
+            updateWidget()
         }
     }
 
@@ -121,6 +162,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _archive.value = emptyList()
             dataStoreManager.saveArchive("")
+            updateWidget()
         }
     }
 
@@ -128,21 +170,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedTab.value = index
     }
 
+    private fun updateWidget() {
+        viewModelScope.launch {
+            try {
+                val manager = androidx.glance.appwidget.GlanceAppWidgetManager(getApplication())
+                val glanceIds = manager.getGlanceIds(DSBWidget::class.java)
+                glanceIds.forEach { glanceId ->
+                    DSBWidget().update(getApplication(), glanceId)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     fun setThemeIndex(index: Int) {
         viewModelScope.launch {
             dataStoreManager.saveThemeIndex(index)
+            updateWidget()
         }
     }
 
     fun toggleColumnOrder() {
         viewModelScope.launch {
             dataStoreManager.saveSwapPreference(!isRoomFirst.value)
+            updateWidget()
         }
     }
 
     fun toggleDynamicColor() {
         viewModelScope.launch {
             dataStoreManager.saveDynamicColorPreference(!dynamicColor.value)
+            updateWidget()
         }
     }
 
@@ -152,13 +209,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleCustomFont() {
+        viewModelScope.launch {
+            dataStoreManager.saveCustomFont(!useCustomFont.value)
+        }
+    }
+
+    fun setFontWeight(value: Float) {
+        viewModelScope.launch { dataStoreManager.saveFontWeight(value) }
+    }
+
+    fun setFontWidth(value: Float) {
+        viewModelScope.launch { dataStoreManager.saveFontWidth(value) }
+    }
+
+    fun setFontOpsz(value: Float) {
+        viewModelScope.launch { dataStoreManager.saveFontOpsz(value) }
+    }
+
+    fun setFontSlnt(value: Float) {
+        viewModelScope.launch { dataStoreManager.saveFontSlnt(value) }
+    }
+
+    fun setFontGrad(value: Float) {
+        viewModelScope.launch { dataStoreManager.saveFontGrad(value) }
+    }
+
+    fun setFontRond(value: Float) {
+        viewModelScope.launch { dataStoreManager.saveFontRond(value) }
+    }
+
     fun toggleSortByPeriod() {
         viewModelScope.launch {
             dataStoreManager.saveSortPreference(!sortByPeriod.value)
-            // Re-sort if we have data
             if (_uiState.value is UiState.Success) {
                 _uiState.value = UiState.Success(sortEntries(lastSuccessEntries))
             }
+        }
+    }
+
+    fun addSelectedClass(className: String) {
+        if (className.isBlank()) return
+        val trimmed = className.trim()
+        if (_selectedClasses.value.contains(trimmed)) return
+        viewModelScope.launch {
+            val updated = _selectedClasses.value + trimmed
+            _selectedClasses.value = updated
+            dataStoreManager.saveSelectedClasses(updated)
+            fetchData()
+        }
+    }
+
+    fun removeSelectedClass(className: String) {
+        viewModelScope.launch {
+            val updated = _selectedClasses.value.filter { it != className }
+            _selectedClasses.value = updated
+            dataStoreManager.saveSelectedClasses(updated)
+            fetchData()
         }
     }
 
@@ -229,12 +336,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isDemoMode = true
         _uiState.value = UiState.Loading
         viewModelScope.launch {
-            kotlinx.coroutines.delay(1000)
+            delay(1000)
             val demoEntries = listOf(
-                SubstitutionEntry("Monday", "Substitution", "10a", "1 - 2", "Math", "R101", "", "", "Teacher sick", ""),
-                SubstitutionEntry("Monday", "Cancellation", "10a", "3", "Physics", "R102", "", "", "", ""),
-                SubstitutionEntry("Tuesday", "Room Change", "10a", "5", "English", "Gym", "", "", "Water damage in R105", ""),
-                SubstitutionEntry("Wednesday", "Substitution", "10a", "4 - 5", "History", "R203", "", "", "", "")
+                SubstitutionEntry("Montag", "Vertretung", "10a", "1 - 2", "Mathematik", "R101", "", "", "Lehrer krank", ""),
+                SubstitutionEntry("Montag", "Entfall", "10a", "3", "Physik", "R102", "", "", "", ""),
+                SubstitutionEntry("Dienstag", "Raumänderung", "10a", "5", "Englisch", "Turnhalle", "", "", "Wasserschaden in R105", ""),
+                SubstitutionEntry("Mittwoch", "Vertretung", "10a", "4 - 5", "Geschichte", "R203", "", "", "", "")
             )
             lastSuccessEntries = demoEntries
             _uiState.value = UiState.Success(sortEntries(demoEntries))
@@ -269,22 +376,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dataStoreManager.clearCredentials()
             _uiState.value = UiState.NeedsLogin
             _selectedTab.value = 0
+            _selectedClasses.value = emptyList()
         }
     }
 
     fun fetchData() {
-        checkCredentialsAndFetch()
+        viewModelScope.launch {
+            val username = dataStoreManager.usernameFlow.first() ?: return@launch
+            val password = dataStoreManager.passwordFlow.first() ?: return@launch
+            val className = dataStoreManager.classNameFlow.first() ?: return@launch
+            if (username.isEmpty() || password.isEmpty()) return@launch
+
+            _isRefreshing.value = true
+            try {
+                val api = DSBMobileAPI(username, password)
+                val allRaw = api.getSubstitutions("")
+
+                val allClassNames = mutableSetOf(className)
+                allClassNames.addAll(_selectedClasses.value)
+
+                val filtered = allRaw.filter { entry ->
+                    allClassNames.any { cls -> entry.className.equals(cls, ignoreCase = true) }
+                }
+
+                val deduped = filtered.distinctBy { it.day + it.lesson + it.subject + it.room + it.art + it.text }
+                lastSuccessEntries = deduped
+                _uiState.value = UiState.Success(sortEntries(deduped))
+                archiveSubstitutions(deduped)
+            } catch (e: Exception) {
+                _uiState.value = UiState.Error(e.message ?: "Unknown error")
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
     }
 
     private suspend fun fetchData(u: String, p: String, c: String) {
         _uiState.value = UiState.Loading
         try {
             val api = DSBMobileAPI(u, p)
-            val entries = api.getSubstitutions(c)
-            lastSuccessEntries = entries
-            _uiState.value = UiState.Success(sortEntries(entries))
-            // Auto-archive
-            archiveSubstitutions(entries)
+            val allRaw = api.getSubstitutions("")
+
+            val allClassNames = mutableSetOf(c)
+            allClassNames.addAll(_selectedClasses.value)
+
+            val filtered = allRaw.filter { entry ->
+                allClassNames.any { cls -> entry.className.equals(cls, ignoreCase = true) }
+            }
+
+            val deduped = filtered.distinctBy { it.day + it.lesson + it.subject + it.room + it.art + it.text }
+            lastSuccessEntries = deduped
+            _uiState.value = UiState.Success(sortEntries(deduped))
+            archiveSubstitutions(deduped)
         } catch (e: Exception) {
             _uiState.value = UiState.Error(e.message ?: "Unknown error")
         }

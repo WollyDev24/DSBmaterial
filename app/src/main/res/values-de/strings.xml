@@ -58,4 +58,29 @@
     <string name="label_debug_switch_desc">Interaktive Umschaltvorschau</string>
     <string name="label_debug_badges">Typ-Badges</string>
     <string name="label_debug_typography">Typografie-Skala</string>
+    
+    <string name="label_today">Heute</string>
+    <string name="label_next_up">Nächste</string>
+    <string name="label_filter">Filter</string>
+    <string name="label_filter_hint">Nach Fach, Raum, Art suchen…</string>
+    <string name="action_share">Teilen</string>
+    <string name="label_multi_class">Mehrere Klassen</string>
+    <string name="label_multi_class_desc">Vertretungen für zusätzliche Klassen anzeigen</string>
+    <string name="label_add_class">Klasse hinzufügen</string>
+    <string name="label_class_hint">Klassenname (z.B. 10b)</string>
+    <string name="label_widget_title">DSB Material</string>
+    <string name="label_widget_desc">Vertretungen für heute</string>
+    <string name="label_widget_no_data">Keine Vertretungen verfügbar</string>
+    <string name="label_widget_updated">Aktualisiert %1$s</string>
+    <string name="label_widget_refresh">Aktualisieren</string>
+    <string name="label_typography">Typografie</string>
+    <string name="label_custom_font">Eigene Schriftart</string>
+    <string name="desc_custom_font">Google Sans Flex variable Schriftart verwenden</string>
+    <string name="label_font_weight">Stärke</string>
+    <string name="label_font_width">Breite</string>
+    <string name="label_font_opsz">Optische Größe</string>
+    <string name="label_font_slnt">Neigung</string>
+    <string name="label_font_grad">Grad</string>
+    <string name="label_font_rond">Rundung</string>
+    <string name="label_preview_font_body">Franz jagt im komplett verwahrlosten Taxi quer durch Bayern</string>
 </resources>

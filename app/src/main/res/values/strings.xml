@@ -71,4 +71,29 @@
     <string name="label_debug_switch_desc">Interactive toggle preview</string>
     <string name="label_debug_badges">Type Badges</string>
     <string name="label_debug_typography">Typography Scale</string>
+    
+    <string name="label_today">Today</string>
+    <string name="label_next_up">Next up</string>
+    <string name="label_filter">Filter</string>
+    <string name="label_filter_hint">Search by subject, room, type…</string>
+    <string name="action_share">Share</string>
+    <string name="label_multi_class">Multi-Class</string>
+    <string name="label_multi_class_desc">View substitutions for additional classes</string>
+    <string name="label_add_class">Add Class</string>
+    <string name="label_class_hint">Class name (e.g. 10b)</string>
+    <string name="label_widget_title">DSB Material</string>
+    <string name="label_widget_desc">Today\'s substitutions</string>
+    <string name="label_widget_no_data">No substitutions available</string>
+    <string name="label_widget_updated">Updated %1$s</string>
+    <string name="label_widget_refresh">Refresh</string>
+    <string name="label_typography">Typography</string>
+    <string name="label_custom_font">Custom Font</string>
+    <string name="desc_custom_font">Use Google Sans Flex variable font</string>
+    <string name="label_font_weight">Weight</string>
+    <string name="label_font_width">Width</string>
+    <string name="label_font_opsz">Optical Size</string>
+    <string name="label_font_slnt">Slant</string>
+    <string name="label_font_grad">Grade</string>
+    <string name="label_font_rond">Roundedness</string>
+    <string name="label_preview_font_body">The quick brown fox jumps over the lazy dog</string>
 </resources>

@@ -1,5 +1,6 @@
 package dev.wolly.dsbmaterial
 
+import android.content.Intent
 import android.os.Bundle
 import dev.wolly.dsbmaterial.BuildConfig
 import androidx.activity.ComponentActivity
@@ -17,6 +18,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -27,6 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,12 +48,17 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.wolly.dsbmaterial.data.SubstitutionEntry
@@ -69,6 +78,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import java.text.SimpleDateFormat
+import java.util.*
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.PI
@@ -81,9 +92,23 @@ class MainActivity : ComponentActivity() {
             val viewModel: MainViewModel = viewModel()
             val dynamicColor by viewModel.dynamicColor.collectAsState()
             val themeIndex by viewModel.themeIndex.collectAsState()
+            val useCustomFont by viewModel.useCustomFont.collectAsState()
+            val fontWeight by viewModel.fontWeight.collectAsState()
+            val fontWidth by viewModel.fontWidth.collectAsState()
+            val fontOpsz by viewModel.fontOpsz.collectAsState()
+            val fontSlnt by viewModel.fontSlnt.collectAsState()
+            val fontGrad by viewModel.fontGrad.collectAsState()
+            val fontRond by viewModel.fontRond.collectAsState()
             DSBMaterialTheme(
                 themeIndex = themeIndex,
-                dynamicColor = dynamicColor
+                dynamicColor = dynamicColor,
+                useCustomFont = useCustomFont,
+                fontWeight = fontWeight,
+                fontWidth = fontWidth,
+                fontOpsz = fontOpsz,
+                fontSlnt = fontSlnt,
+                fontGrad = fontGrad,
+                fontRond = fontRond
             ) {
                 DSBApp(viewModel)
             }
@@ -102,6 +127,15 @@ fun DSBApp(viewModel: MainViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val archiveEntries by viewModel.archive.collectAsState()
     val navHidden by viewModel.navHidden.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val selectedClasses by viewModel.selectedClasses.collectAsState()
+    val useCustomFont by viewModel.useCustomFont.collectAsState()
+    val fontWeight by viewModel.fontWeight.collectAsState()
+    val fontWidth by viewModel.fontWidth.collectAsState()
+    val fontOpsz by viewModel.fontOpsz.collectAsState()
+    val fontSlnt by viewModel.fontSlnt.collectAsState()
+    val fontGrad by viewModel.fontGrad.collectAsState()
+    val fontRond by viewModel.fontRond.collectAsState()
     
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     val sheetState = rememberModalBottomSheetState()
@@ -111,6 +145,7 @@ fun DSBApp(viewModel: MainViewModel) {
     var cardRect by remember { mutableStateOf(Rect.Zero) }
     var isDismissing by remember { mutableStateOf(false) }
     var showThemePicker by remember { mutableStateOf(false) }
+    var showTypographyPicker by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showDebug by remember { mutableStateOf(false) }
     var collapseFraction by remember { mutableFloatStateOf(0f) }
@@ -153,13 +188,13 @@ fun DSBApp(viewModel: MainViewModel) {
 
     val isTablet = isExpandedScreen()
 
-    val showNavCondition by remember(showThemePicker, showAbout, showDebug, uiState, pagerState.currentPage) {
+    val showNavCondition by remember(showThemePicker, showTypographyPicker, showAbout, showDebug, uiState, pagerState.currentPage) {
         derivedStateOf {
-            !showThemePicker && !showAbout && !showDebug && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
+            !showThemePicker && !showTypographyPicker && !showAbout && !showDebug && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
         }
     }
 
-    BackHandler(enabled = showSheet || showThemePicker || showAbout || showDebug || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
+    BackHandler(enabled = showSheet || showThemePicker || showTypographyPicker || showAbout || showDebug || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
         if (showSheet) {
             if (isTablet) {
                 scope.launch {
@@ -175,6 +210,8 @@ fun DSBApp(viewModel: MainViewModel) {
             }
         } else if (showThemePicker) {
             showThemePicker = false
+        } else if (showTypographyPicker) {
+            showTypographyPicker = false
         } else if (showAbout) {
             showAbout = false
         } else if (showDebug) {
@@ -239,13 +276,14 @@ fun DSBApp(viewModel: MainViewModel) {
                     CollapsingTopBar(
                         title = when {
                             showThemePicker -> stringResource(R.string.label_theme_picker)
+                            showTypographyPicker -> stringResource(R.string.label_typography)
                             pagerState.currentPage == 1 -> stringResource(R.string.label_archive)
                             pagerState.currentPage == 2 -> stringResource(R.string.title_settings)
                             else -> stringResource(R.string.title_main)
                         },
                         collapseFraction = collapseFraction,
                         actions = {
-                            if (!showThemePicker) {
+                            if (!showThemePicker && !showTypographyPicker) {
                                 if (pagerState.currentPage == 0 && (uiState is UiState.Success || uiState is UiState.Idle)) {
                                     val isRefreshing = uiState is UiState.Loading
                                     val refreshRotation by animateFloatAsState(
@@ -301,6 +339,8 @@ fun DSBApp(viewModel: MainViewModel) {
                                         entries = currentUiState.entries,
                                         selectedDay = selectedDay,
                                         cardAlpha = cardAlpha,
+                                        isRefreshing = isRefreshing,
+                                        onRefresh = { viewModel.fetchData() },
                                         modifier = Modifier.nestedScroll(scrollTrackerConnection),
                                         onDayClick = { day, bounds ->
                                             selectedDay = day
@@ -320,14 +360,18 @@ fun DSBApp(viewModel: MainViewModel) {
                             sortByPeriod = sortByPeriod,
                             dynamicColor = dynamicColor,
                             navHidden = navHidden,
+                            selectedClasses = selectedClasses,
                             onToggleOrder = viewModel::toggleColumnOrder,
                             onToggleSort = viewModel::toggleSortByPeriod,
                             onToggleDynamic = viewModel::toggleDynamicColor,
                             onToggleNavHidden = viewModel::toggleNavHidden,
                             onOpenThemePicker = { showThemePicker = true },
+                            onOpenTypographyPicker = { showTypographyPicker = true },
                             onChangeClass = viewModel::changeClass,
                             onLogout = viewModel::logout,
                             onAbout = { showAbout = true },
+                            onAddClass = viewModel::addSelectedClass,
+                            onRemoveClass = viewModel::removeSelectedClass,
                             modifier = Modifier.nestedScroll(scrollTrackerConnection)
                         )
                         }
@@ -380,13 +424,29 @@ fun DSBApp(viewModel: MainViewModel) {
 
             OverlayContent(
                 showThemePicker = showThemePicker,
+                showTypographyPicker = showTypographyPicker,
                 showAbout = showAbout,
                 showDebug = showDebug,
                 uiState = uiState,
                 themeIndex = themeIndex,
                 dynamicColor = dynamicColor,
+                useCustomFont = useCustomFont,
+                fontWeight = fontWeight,
+                fontWidth = fontWidth,
+                fontOpsz = fontOpsz,
+                fontSlnt = fontSlnt,
+                fontGrad = fontGrad,
+                fontRond = fontRond,
                 onSelectTheme = { viewModel.setThemeIndex(it) },
                 onCloseThemePicker = { showThemePicker = false },
+                onCloseTypographyPicker = { showTypographyPicker = false },
+                onToggleCustomFont = viewModel::toggleCustomFont,
+                onFontWeightChange = viewModel::setFontWeight,
+                onFontWidthChange = viewModel::setFontWidth,
+                onFontOpszChange = viewModel::setFontOpsz,
+                onFontSlntChange = viewModel::setFontSlnt,
+                onFontGradChange = viewModel::setFontGrad,
+                onFontRondChange = viewModel::setFontRond,
                 onCloseAbout = { showAbout = false },
                 onOpenDebug = { showAbout = false; showDebug = true },
                 onCloseDebug = { showDebug = false },
@@ -863,7 +923,7 @@ fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemo
         LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             grouped.forEach { (day, dayEntries) ->
                 item {
-                    Text(day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp).animateItem(fadeInSpec = tween(500)))
+                    Text(day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp))
                 }
                 items(dayEntries, key = { it.day + it.lesson + it.subject }) { entry ->
                     Card(
@@ -895,16 +955,23 @@ fun SettingsScreen(
     sortByPeriod: Boolean,
     dynamicColor: Boolean,
     navHidden: Boolean,
+    selectedClasses: List<String> = emptyList(),
     onToggleOrder: () -> Unit,
     onToggleSort: () -> Unit,
     onToggleDynamic: () -> Unit,
     onToggleNavHidden: () -> Unit,
     onOpenThemePicker: () -> Unit,
+    onOpenTypographyPicker: () -> Unit,
     onChangeClass: () -> Unit,
     onLogout: () -> Unit,
     onAbout: () -> Unit,
+    onAddClass: (String) -> Unit = {},
+    onRemoveClass: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var newClassName by remember { mutableStateOf("") }
+    var showAddClassField by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -916,7 +983,7 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 8.dp, bottom = 4.dp).animateItem(fadeInSpec = tween(500))
+                    modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
                 )
             }
 
@@ -954,6 +1021,13 @@ fun SettingsScreen(
                             isActive = navHidden,
                             trailing = { ExpressiveSwitch(checked = navHidden, onCheckedChange = { onToggleNavHidden() }) }
                         )
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                        SettingItem(
+                            title = stringResource(R.string.label_typography),
+                            description = stringResource(R.string.desc_custom_font),
+                            icon = Icons.Default.FormatSize,
+                            onClick = onOpenTypographyPicker
+                        )
                         if (!dynamicColor) {
                             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
                             SettingItem(
@@ -962,6 +1036,76 @@ fun SettingsScreen(
                                 icon = Icons.Default.ColorLens,
                                 onClick = onOpenThemePicker
                             )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.label_multi_class),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+                )
+            }
+
+            item {
+                SettingCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            stringResource(R.string.label_multi_class_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (selectedClasses.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            selectedClasses.forEach { cls ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Class, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(cls, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { onRemoveClass(cls) }, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        if (showAddClassField) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = newClassName,
+                                    onValueChange = { newClassName = it },
+                                    modifier = Modifier.weight(1f),
+                                    placeholder = { Text(stringResource(R.string.label_class_hint)) },
+                                    singleLine = true,
+                                    shape = MaterialTheme.shapes.large
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = {
+                                        if (newClassName.isNotBlank()) {
+                                            onAddClass(newClassName)
+                                            newClassName = ""
+                                            showAddClassField = false
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        } else {
+                            TextButton(onClick = { showAddClassField = true }) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.label_add_class))
+                            }
                         }
                     }
                 }
@@ -1017,7 +1161,7 @@ fun SettingsScreen(
 @Composable
 fun SettingCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth().animateContentSize().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        modifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
         content = content
@@ -1284,13 +1428,29 @@ fun DebugModeScreen(onBack: () -> Unit) {
 @Composable
 fun OverlayContent(
     showThemePicker: Boolean,
+    showTypographyPicker: Boolean,
     showAbout: Boolean,
     showDebug: Boolean,
     uiState: UiState,
     themeIndex: Int,
     dynamicColor: Boolean,
+    useCustomFont: Boolean,
+    fontWeight: Float,
+    fontWidth: Float,
+    fontOpsz: Float,
+    fontSlnt: Float,
+    fontGrad: Float,
+    fontRond: Float,
     onSelectTheme: (Int) -> Unit,
     onCloseThemePicker: () -> Unit,
+    onCloseTypographyPicker: () -> Unit,
+    onToggleCustomFont: () -> Unit,
+    onFontWeightChange: (Float) -> Unit,
+    onFontWidthChange: (Float) -> Unit,
+    onFontOpszChange: (Float) -> Unit,
+    onFontSlntChange: (Float) -> Unit,
+    onFontGradChange: (Float) -> Unit,
+    onFontRondChange: (Float) -> Unit,
     onCloseAbout: () -> Unit,
     onOpenDebug: () -> Unit,
     onCloseDebug: () -> Unit,
@@ -1299,7 +1459,7 @@ fun OverlayContent(
     onLoginDemo: () -> Unit
 ) {
     androidx.compose.animation.AnimatedVisibility(
-        visible = showThemePicker || showAbout || showDebug || uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass,
+        visible = showThemePicker || showTypographyPicker || showAbout || showDebug || uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass,
         enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.92f, animationSpec = tween(300)),
         exit = fadeOut(tween(250)) + scaleOut(targetScale = 0.92f, animationSpec = tween(250))
     ) {
@@ -1309,6 +1469,23 @@ fun OverlayContent(
                 dynamicColor = dynamicColor,
                 onSelect = onSelectTheme,
                 onBack = onCloseThemePicker
+            )
+            showTypographyPicker -> TypographyPickerScreen(
+                useCustomFont = useCustomFont,
+                fontWeight = fontWeight,
+                fontWidth = fontWidth,
+                fontOpsz = fontOpsz,
+                fontSlnt = fontSlnt,
+                fontGrad = fontGrad,
+                fontRond = fontRond,
+                onToggleCustomFont = onToggleCustomFont,
+                onFontWeightChange = onFontWeightChange,
+                onFontWidthChange = onFontWidthChange,
+                onFontOpszChange = onFontOpszChange,
+                onFontSlntChange = onFontSlntChange,
+                onFontGradChange = onFontGradChange,
+                onFontRondChange = onFontRondChange,
+                onBack = onCloseTypographyPicker
             )
             showAbout -> AboutScreen(onBack = onCloseAbout, onDebugTap = onOpenDebug)
             showDebug -> DebugModeScreen(onBack = onCloseDebug)
@@ -1559,7 +1736,7 @@ fun ClassSelectionScreen(classes: List<String>, onClassSelected: (String) -> Uni
                     onClick = { onClassSelected(cls) },
                     shape = MaterialTheme.shapes.extraLarge,
                     color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
-                    modifier = Modifier.animateItem(fadeInSpec = tween(500)).fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(20.dp),
@@ -1575,9 +1752,12 @@ fun ClassSelectionScreen(classes: List<String>, onClassSelected: (String) -> Uni
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit, selectedDay: String? = null, cardAlpha: Float = 1f, modifier: Modifier = Modifier) {
-    val dayData = remember(entries) {
+fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit, selectedDay: String? = null, cardAlpha: Float = 1f, isRefreshing: Boolean = false, onRefresh: () -> Unit = {}, modifier: Modifier = Modifier) {
+    var filterQuery by remember { mutableStateOf("") }
+
+    val allDayData = remember(entries) {
         val filtered = entries.filter { day ->
             val lowerDay = day.day.lowercase()
             !lowerDay.contains("samstag") && !lowerDay.contains("sonntag") &&
@@ -1588,11 +1768,95 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit
         for (entry in filtered) {
             counts[entry.day] = (counts[entry.day] ?: 0) + 1
         }
-        distinctDays to counts
+        val allEntriesByDay = filtered.groupBy { it.day }
+        Triple(distinctDays, counts, allEntriesByDay)
     }
-    val days = dayData.first
-    val dayCounts = dayData.second
-    
+    val days = allDayData.first
+    val dayCounts = allDayData.second
+    val allEntriesByDay = allDayData.third
+    val classesByDay = remember(allDayData) {
+        val filtered = entries.filter { day ->
+            val lowerDay = day.day.lowercase()
+            !lowerDay.contains("samstag") && !lowerDay.contains("sonntag") &&
+            !lowerDay.contains("saturday") && !lowerDay.contains("sunday")
+        }
+        filtered.groupBy { it.day }.mapValues { (_, dayEntries) ->
+            dayEntries.map { it.className }.filter { it.isNotEmpty() }.distinct()
+        }
+    }
+
+    val filteredDays = remember(days, filterQuery, allEntriesByDay) {
+        if (filterQuery.isBlank()) {
+            days
+        } else {
+            val q = filterQuery.lowercase()
+            days.filter { day ->
+                allEntriesByDay[day]?.any { entry ->
+                    entry.subject.lowercase().contains(q) ||
+                    entry.room.lowercase().contains(q) ||
+                    entry.art.lowercase().contains(q) ||
+                    entry.text.lowercase().contains(q) ||
+                    entry.lesson.lowercase().contains(q)
+                } == true
+            }
+        }
+    }
+
+    val todayDayName = remember {
+        val cal = Calendar.getInstance()
+        when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.MONDAY -> "Montag"
+            Calendar.TUESDAY -> "Dienstag"
+            Calendar.WEDNESDAY -> "Mittwoch"
+            Calendar.THURSDAY -> "Donnerstag"
+            Calendar.FRIDAY -> "Freitag"
+            Calendar.SATURDAY -> "Samstag"
+            Calendar.SUNDAY -> "Sonntag"
+            else -> ""
+        }
+    }
+
+    val todayDateStr = remember {
+        val cal = Calendar.getInstance()
+        val day = cal.get(Calendar.DAY_OF_MONTH)
+        val month = cal.get(Calendar.MONTH) + 1
+        val year = cal.get(Calendar.YEAR)
+        String.format("%02d.%02d.%04d", day, month, year)
+    }
+
+    val isToday = remember(days) {
+        days.any { day ->
+            val lower = day.lowercase()
+            lower.startsWith(todayDayName.lowercase()) ||
+            lower.contains(todayDateStr)
+        }
+    }
+
+    val nextUpDay = remember(days, isToday, todayDayName, todayDateStr) {
+        if (isToday) null
+        else {
+            val dayOrder = listOf("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+            val todayIndex = dayOrder.indexOfFirst { it.equals(todayDayName, ignoreCase = true) }
+            if (todayIndex < 0) null
+            else {
+                val dateRegex = Regex("""(\d{2})\.(\d{2})\.(\d{4})""")
+                days.sortedBy { day ->
+                    val match = dateRegex.find(day)
+                    if (match != null) {
+                        val (d, m, y) = match.destructured
+                        y.toLong() * 10000 + m.toLong() * 100 + d.toLong()
+                    } else {
+                        val matchIndex = dayOrder.indexOfFirst { day.lowercase().startsWith(it.lowercase()) }
+                        if (matchIndex >= 0) {
+                            val adjustedIndex = if (matchIndex < todayIndex) matchIndex + 7 else matchIndex
+                            adjustedIndex.toLong()
+                        } else Long.MAX_VALUE
+                    }
+                }.firstOrNull()
+            }
+        }
+    }
+
     if (days.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(stringResource(R.string.msg_no_substitutions))
@@ -1602,52 +1866,97 @@ fun DayList(entries: List<SubstitutionEntry>, onDayClick: (String, Rect) -> Unit
         val pad = remember(isTablet) { PaddingValues(if (isTablet) 20.dp else 20.dp) }
         val spacing = remember(isTablet) { if (isTablet) 16.dp else 24.dp }
 
+        val pullRefreshState = rememberPullToRefreshState()
+
         if (isTablet) {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(280.dp),
-                modifier = modifier.fillMaxSize(),
-                contentPadding = pad,
-                horizontalArrangement = Arrangement.spacedBy(spacing),
-                verticalArrangement = Arrangement.spacedBy(spacing)
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+                state = pullRefreshState,
+                modifier = modifier.fillMaxSize()
             ) {
-                items(count = days.size, key = { days[it] }) { index ->
-                    val day = days[index]
-                    val isOrigin = isTablet && selectedDay != null && day == selectedDay
-                    val cardBounds = remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
-                    Box(
-                        modifier = Modifier
-                            .animateItem(fadeInSpec = tween(500))
-                            .fillMaxSize()
-                            .alpha(if (isOrigin) cardAlpha else 1f)
-                            .onGloballyPositioned { cardBounds.value = it.boundsInRoot() },
-                        contentAlignment = Alignment.TopStart
-                    ) {
-                        StaggeredFadeIn(index) {
-                            DayCard(day, dayCounts[day] ?: 0) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(280.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = pad,
+                    horizontalArrangement = Arrangement.spacedBy(spacing),
+                    verticalArrangement = Arrangement.spacedBy(spacing)
+                ) {
+                    if (filterQuery.isBlank()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            FilterBar(filterQuery = filterQuery, onFilterChange = { filterQuery = it })
+                        }
+                    }
+                    items(count = filteredDays.size, key = { filteredDays[it] }) { index ->
+                        val day = filteredDays[index]
+                        val isOrigin = isTablet && selectedDay != null && day == selectedDay
+                        val cardBounds = remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
+                        val isCurrentDay = isToday && day.lowercase().startsWith(todayDayName.lowercase())
+                        val isNext = !isCurrentDay && nextUpDay != null && day == nextUpDay
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(if (isOrigin) cardAlpha else 1f)
+                                .onGloballyPositioned { cardBounds.value = it.boundsInRoot() },
+                            contentAlignment = Alignment.TopStart
+                        ) {
+                            DayCard(day, dayCounts[day] ?: 0, classes = classesByDay[day] ?: emptyList(), isToday = isCurrentDay, isNextUp = isNext) {
                                 if (!isOrigin) onDayClick(day, cardBounds.value)
                             }
                         }
                     }
+                    item { Spacer(Modifier.height(120.dp)) }
                 }
-                item { Spacer(Modifier.height(120.dp)) }
             }
         } else {
-            LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = pad, verticalArrangement = Arrangement.spacedBy(spacing)) {
-                itemsIndexed(days, key = { _, it -> it }) { index, day ->
-                    StaggeredFadeIn(index) {
-                        Box(modifier = Modifier.animateItem(fadeInSpec = tween(500))) {
-                            DayCard(day, dayCounts[day] ?: 0) { onDayClick(day, Rect(0f, 0f, 0f, 0f)) }
-                        }
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+                state = pullRefreshState,
+                modifier = modifier.fillMaxSize()
+            ) {
+                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = pad, verticalArrangement = Arrangement.spacedBy(spacing)) {
+                    item {
+                        FilterBar(filterQuery = filterQuery, onFilterChange = { filterQuery = it })
                     }
+                    items(filteredDays, key = { it }) { day ->
+                        val isCurrentDay = isToday && day.lowercase().startsWith(todayDayName.lowercase())
+                        val isNext = !isCurrentDay && nextUpDay != null && day == nextUpDay
+                        DayCard(day, dayCounts[day] ?: 0, classes = classesByDay[day] ?: emptyList(), isToday = isCurrentDay, isNextUp = isNext) { onDayClick(day, Rect(0f, 0f, 0f, 0f)) }
+                    }
+                    item { Spacer(Modifier.height(120.dp)) }
                 }
-                item { Spacer(Modifier.height(120.dp)) }
             }
         }
     }
 }
 
 @Composable
-private fun DayCard(day: String, count: Int, onDayClick: (String) -> Unit) {
+fun FilterBar(filterQuery: String, onFilterChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = filterQuery,
+        onValueChange = onFilterChange,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text(stringResource(R.string.label_filter_hint)) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        trailingIcon = {
+            if (filterQuery.isNotEmpty()) {
+                IconButton(onClick = { onFilterChange("") }) {
+                    Icon(Icons.Default.Clear, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        singleLine = true,
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+            focusedBorderColor = MaterialTheme.colorScheme.primary
+        )
+    )
+}
+
+@Composable
+private fun DayCard(day: String, count: Int, classes: List<String> = emptyList(), isToday: Boolean = false, isNextUp: Boolean = false, onDayClick: (String) -> Unit) {
     val isTablet = isExpandedScreen()
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -1670,12 +1979,45 @@ private fun DayCard(day: String, count: Int, onDayClick: (String) -> Unit) {
             scaleY = pressScale
         },
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isPressed) 0.12f else 0.08f)),
+        colors = CardDefaults.cardColors(containerColor = when {
+            isToday -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            isNextUp -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+            else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isPressed) 0.12f else 0.08f)
+        }),
         interactionSource = interactionSource,
         onClick = { }
     ) {
         Column(modifier = Modifier.padding(dp(16.dp, 24.dp))) {
-            Text(text = day, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = day, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                if (isToday) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.label_today),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                } else if (isNextUp) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondary,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.label_next_up),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondary
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Text(
                 text = if (count == 1) stringResource(R.string.format_substitutions_count_one, count)
@@ -1683,6 +2025,25 @@ private fun DayCard(day: String, count: Int, onDayClick: (String) -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (classes.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    classes.forEach { cls ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                text = cls,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.height(if (isTablet) 16.dp else 24.dp))
             Button(
                 onClick = { onDayClick(day) },
@@ -1704,37 +2065,43 @@ fun SubstitutionViewer(
     isRoomFirst: Boolean, 
     isExpanded: Boolean
 ) {
-    val headerFontSize by animateFloatAsState(
-        targetValue = if (isExpanded) 36f else 22f,
+    val context = LocalContext.current
+    val expandProgress by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "header_font_size"
+        label = "expand_progress"
     )
-    val containerPadding by animateDpAsState(
-        targetValue = if (isExpanded) 8.dp else 12.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "container_padding"
-    )
-    val textPaddingStart by animateDpAsState(
-        targetValue = if (isExpanded) 12.dp else 16.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "text_padding_start"
-    )
-    val textPaddingTop by animateDpAsState(
-        targetValue = if (isExpanded) 8.dp else 16.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "text_padding_top"
-    )
+    val headerFontSize = 22f + (36f - 22f) * expandProgress
+    val containerPadding = lerp(12.dp, 8.dp, expandProgress)
+    val textPaddingStart = lerp(16.dp, 12.dp, expandProgress)
+    val textPaddingTop = lerp(16.dp, 8.dp, expandProgress)
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = containerPadding)) {
-        Text(
-            text = day,
-            style = MaterialTheme.typography.headlineLarge.copy(
-                fontSize = headerFontSize.sp,
-                lineHeight = (headerFontSize * 1.2f).sp
-            ),
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.padding(start = textPaddingStart, top = textPaddingTop, bottom = 16.dp)
-        )
+        Row(
+            modifier = Modifier.padding(start = textPaddingStart, top = textPaddingTop, end = 8.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = day,
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontSize = headerFontSize.sp,
+                    lineHeight = (headerFontSize * 1.2f).sp
+                ),
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = {
+                val shareText = buildShareText(day, entries, isRoomFirst)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, shareText)
+                    putExtra(Intent.EXTRA_SUBJECT, day)
+                }
+                context.startActivity(Intent.createChooser(intent, context.getString(R.string.action_share)))
+            }) {
+                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.action_share), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
         
         Surface(
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
@@ -1757,9 +2124,7 @@ fun SubstitutionViewer(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(entries, key = { it.day + it.lesson + it.subject }) { entry ->
-                Box(modifier = Modifier.animateItem(fadeInSpec = tween(500))) {
-                    SubstitutionTableRow(entry, isRoomFirst)
-                }
+                SubstitutionTableRow(entry, isRoomFirst)
             }
         }
     }
@@ -1921,6 +2286,20 @@ fun SubstitutionTableRowContent(
             }
         }
 
+        if (entry.className.isNotEmpty()) {
+            Text(
+                text = entry.className,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
+
         if (entry.text.isNotEmpty()) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
@@ -1965,14 +2344,21 @@ fun RowScope.TableCell(
     )
 }
 
-@Composable
-fun StaggeredFadeIn(index: Int, delayMs: Int = 80, content: @Composable () -> Unit) {
-    val alpha by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(400, delayMillis = index * delayMs),
-        label = "staggered_alpha"
-    )
-    Box(modifier = Modifier.graphicsLayer { this.alpha = alpha }) { content() }
+private fun buildShareText(day: String, entries: List<SubstitutionEntry>, isRoomFirst: Boolean): String {
+    val sb = StringBuilder()
+    sb.appendLine("📚 $day")
+    sb.appendLine("─".repeat(20))
+    for (entry in entries) {
+        val roomDisplay = if (isRoomFirst) entry.room else entry.art
+        val typeDisplay = if (isRoomFirst) entry.art else entry.room
+        sb.appendLine("${entry.lesson} | ${entry.subject} | $roomDisplay | $typeDisplay")
+        if (entry.text.isNotEmpty()) {
+            sb.appendLine("  → ${entry.text}")
+        }
+    }
+    sb.appendLine()
+    sb.appendLine("DSBmaterial: https://github.com/wollydev24/DSBmaterial")
+    return sb.toString()
 }
 
 @Composable
@@ -2099,5 +2485,199 @@ fun ExpressiveSwitch(
                 tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
             )
         }
+    }
+}
+
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+@Composable
+fun TypographyPickerScreen(
+    useCustomFont: Boolean,
+    fontWeight: Float,
+    fontWidth: Float,
+    fontOpsz: Float,
+    fontSlnt: Float,
+    fontGrad: Float,
+    fontRond: Float,
+    onToggleCustomFont: () -> Unit,
+    onFontWeightChange: (Float) -> Unit,
+    onFontWidthChange: (Float) -> Unit,
+    onFontOpszChange: (Float) -> Unit,
+    onFontSlntChange: (Float) -> Unit,
+    onFontGradChange: (Float) -> Unit,
+    onFontRondChange: (Float) -> Unit,
+    onBack: () -> Unit
+) {
+    var localWeight by remember { mutableFloatStateOf(fontWeight) }
+    var localWidth by remember { mutableFloatStateOf(fontWidth) }
+    var localOpsz by remember { mutableFloatStateOf(fontOpsz) }
+    var localSlnt by remember { mutableFloatStateOf(fontSlnt) }
+    var localGrad by remember { mutableFloatStateOf(fontGrad) }
+    var localRond by remember { mutableFloatStateOf(fontRond) }
+
+    LaunchedEffect(fontWeight) { localWeight = fontWeight }
+    LaunchedEffect(fontWidth) { localWidth = fontWidth }
+    LaunchedEffect(fontOpsz) { localOpsz = fontOpsz }
+    LaunchedEffect(fontSlnt) { localSlnt = fontSlnt }
+    LaunchedEffect(fontGrad) { localGrad = fontGrad }
+    LaunchedEffect(fontRond) { localRond = fontRond }
+
+    var screenEntered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { screenEntered = true }
+
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        AnimatedVisibility(
+            visible = screenEntered,
+            enter = slideInHorizontally(animationSpec = tween(400)) { -it } + fadeIn(tween(300)),
+            label = "header_enter"
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                }
+                Text(
+                    text = stringResource(R.string.label_typography),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+        ) {
+            AnimatedVisibility(
+                visible = screenEntered,
+                enter = fadeIn(tween(300, delayMillis = 120)) +
+                    slideInVertically(animationSpec = tween(400, delayMillis = 120)) { it / 3 },
+                label = "content_enter"
+            ) {
+                Column {
+                    SettingCard {
+                        SettingItem(
+                            title = stringResource(R.string.label_custom_font),
+                            description = stringResource(R.string.desc_custom_font),
+                            icon = Icons.Default.FormatSize,
+                            isActive = useCustomFont,
+                            trailing = { ExpressiveSwitch(checked = useCustomFont, onCheckedChange = { onToggleCustomFont() }) }
+                        )
+                    }
+
+                    if (useCustomFont) {
+                        Spacer(Modifier.height(16.dp))
+
+                        val previewFamily = remember(localWeight, localWidth, localOpsz, localSlnt, localGrad, localRond) {
+                            FontFamily(
+                                Font(
+                                    resId = R.font.google_sans_flex,
+                                    variationSettings = FontVariation.Settings(
+                                        FontVariation.weight(localWeight.toInt()),
+                                        FontVariation.width(localWidth / 100f),
+                                        FontVariation.slant(localSlnt),
+                                        FontVariation.Setting("opsz", localOpsz),
+                                        FontVariation.Setting("GRAD", localGrad),
+                                        FontVariation.Setting("ROND", localRond)
+                                    )
+                                )
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(20.dp)) {
+                                Text(
+                                    text = stringResource(R.string.title_main),
+                                    fontFamily = previewFamily,
+                                    fontSize = 28.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = stringResource(R.string.label_preview_font_body),
+                                    fontFamily = previewFamily,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Aa Bb Cc 123 !@#",
+                                    fontFamily = previewFamily,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                                FontSlider(label = stringResource(R.string.label_font_weight), value = localWeight, valueRange = 100f..900f, steps = 7, displayValue = { v -> "${v.toInt()}" }, onValueChange = { localWeight = it }, onValueChangeFinished = { onFontWeightChange(localWeight) })
+                                FontSlider(label = stringResource(R.string.label_font_width), value = localWidth, valueRange = 62.5f..100f, steps = 14, displayValue = { v -> "%.1f".format(v) }, onValueChange = { localWidth = it }, onValueChangeFinished = { onFontWidthChange(localWidth) })
+                                FontSlider(label = stringResource(R.string.label_font_opsz), value = localOpsz, valueRange = 8f..144f, steps = 0, displayValue = { v -> "${v.toInt()}" }, onValueChange = { localOpsz = it }, onValueChangeFinished = { onFontOpszChange(localOpsz) })
+                                FontSlider(label = stringResource(R.string.label_font_slnt), value = localSlnt, valueRange = -10f..0f, steps = 9, displayValue = { v -> "${v.toInt()}" }, onValueChange = { localSlnt = it }, onValueChangeFinished = { onFontSlntChange(localSlnt) })
+                                FontSlider(label = stringResource(R.string.label_font_grad), value = localGrad, valueRange = -200f..150f, steps = 0, displayValue = { v -> "${v.toInt()}" }, onValueChange = { localGrad = it }, onValueChangeFinished = { onFontGradChange(localGrad) })
+                                FontSlider(label = stringResource(R.string.label_font_rond), value = localRond, valueRange = 0f..100f, steps = 0, displayValue = { v -> "${v.toInt()}" }, onValueChange = { localRond = it }, onValueChangeFinished = { onFontRondChange(localRond) })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FontSlider(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    displayValue: (Float) -> String,
+    onValueChangeFinished: () -> Unit = {}
+) {
+    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = displayValue(value),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            valueRange = valueRange,
+            steps = steps
+        )
     }
 }

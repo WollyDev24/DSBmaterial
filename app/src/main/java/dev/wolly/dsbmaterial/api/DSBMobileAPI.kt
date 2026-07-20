@@ -256,10 +256,11 @@ class DSBMobileAPI(private val username: String, private val password: String) {
             val raw = el.text()
             if (raw.isEmpty()) continue
             
-            // Apply filter check against raw text to catch matches before sanitization
-            if (classFilter.isNotEmpty() && !raw.lowercase().contains(classFilter.lowercase())) continue
-
             val c = cells.map { cellText(it) }
+            
+            // Filter on the class column (first cell) instead of raw row text
+            val classColumn = c.getOrNull(0) ?: ""
+            if (classFilter.isNotEmpty() && !classColumn.lowercase().contains(classFilter.lowercase())) continue
             
             // Validation: A valid substitution row MUST have a lesson/period (usually in column 1)
             val lessonRaw = c.getOrNull(1) ?: ""
