@@ -33,6 +33,9 @@ class DataStoreManager(private val context: Context) {
         val FONT_SLNT = floatPreferencesKey("font_slnt")
         val FONT_GRAD = floatPreferencesKey("font_grad")
         val FONT_ROND = floatPreferencesKey("font_rond")
+        val AUTO_FETCH_ENABLED = booleanPreferencesKey("auto_fetch_enabled")
+        val AUTO_FETCH_INTERVAL = intPreferencesKey("auto_fetch_interval")
+        val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
     }
 
     val usernameFlow: Flow<String?> = context.dataStore.data.map { it[USERNAME] }
@@ -52,6 +55,9 @@ class DataStoreManager(private val context: Context) {
     val fontSlntFlow: Flow<Float> = context.dataStore.data.map { it[FONT_SLNT] ?: 0f }
     val fontGradFlow: Flow<Float> = context.dataStore.data.map { it[FONT_GRAD] ?: 0f }
     val fontRondFlow: Flow<Float> = context.dataStore.data.map { it[FONT_ROND] ?: 0f }
+    val autoFetchEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_FETCH_ENABLED] ?: false }
+    val autoFetchIntervalFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_FETCH_INTERVAL] ?: 30 }
+    val notificationsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
 
     suspend fun saveCredentials(username: String, password: String, className: String) {
         context.dataStore.edit { settings ->
@@ -115,6 +121,18 @@ class DataStoreManager(private val context: Context) {
 
     suspend fun saveFontRond(value: Float) {
         context.dataStore.edit { it[FONT_ROND] = value }
+    }
+
+    suspend fun saveAutoFetchEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_FETCH_ENABLED] = enabled }
+    }
+
+    suspend fun saveAutoFetchInterval(minutes: Int) {
+        context.dataStore.edit { it[AUTO_FETCH_INTERVAL] = minutes }
+    }
+
+    suspend fun saveNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled }
     }
 
     suspend fun clearCredentials() {

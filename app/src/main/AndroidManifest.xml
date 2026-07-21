@@ -3,8 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
+        android:name=".DSBApp"
         android:enableOnBackInvokedCallback="true"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

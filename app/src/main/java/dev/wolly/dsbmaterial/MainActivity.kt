@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.wolly.dsbmaterial.data.SubstitutionEntry
 import dev.wolly.dsbmaterial.ui.MainViewModel
+import dev.wolly.dsbmaterial.ui.StatsData
 import dev.wolly.dsbmaterial.ui.UiState
 import dev.wolly.dsbmaterial.ui.theme.DSBMaterialTheme
 import dev.wolly.dsbmaterial.ui.theme.themePresets
@@ -70,6 +71,7 @@ import dev.wolly.dsbmaterial.ui.theme.themePresets
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -129,6 +131,9 @@ fun DSBApp(viewModel: MainViewModel) {
     val navHidden by viewModel.navHidden.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val selectedClasses by viewModel.selectedClasses.collectAsState()
+    val autoFetchEnabled by viewModel.autoFetchEnabled.collectAsState()
+    val autoFetchInterval by viewModel.autoFetchInterval.collectAsState()
+    val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
     val useCustomFont by viewModel.useCustomFont.collectAsState()
     val fontWeight by viewModel.fontWeight.collectAsState()
     val fontWidth by viewModel.fontWidth.collectAsState()
@@ -148,6 +153,9 @@ fun DSBApp(viewModel: MainViewModel) {
     var showTypographyPicker by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showDebug by remember { mutableStateOf(false) }
+    var showCalendar by remember { mutableStateOf(false) }
+    var showStats by remember { mutableStateOf(false) }
+    var calendarSelectedDay by remember { mutableStateOf<String?>(null) }
     var collapseFraction by remember { mutableFloatStateOf(0f) }
 
     val scrollTrackerConnection = remember {
@@ -188,13 +196,13 @@ fun DSBApp(viewModel: MainViewModel) {
 
     val isTablet = isExpandedScreen()
 
-    val showNavCondition by remember(showThemePicker, showTypographyPicker, showAbout, showDebug, uiState, pagerState.currentPage) {
+    val showNavCondition by remember(showThemePicker, showTypographyPicker, showAbout, showDebug, showCalendar, showStats, uiState, pagerState.currentPage) {
         derivedStateOf {
-            !showThemePicker && !showTypographyPicker && !showAbout && !showDebug && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
+            !showThemePicker && !showTypographyPicker && !showAbout && !showDebug && !showCalendar && !showStats && uiState !is UiState.NeedsLogin && uiState !is UiState.Loading && uiState !is UiState.SelectingClass
         }
     }
 
-    BackHandler(enabled = showSheet || showThemePicker || showTypographyPicker || showAbout || showDebug || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
+    BackHandler(enabled = showSheet || showThemePicker || showTypographyPicker || showAbout || showDebug || showCalendar || showStats || uiState is UiState.SelectingClass || pagerState.currentPage != 0) {
         if (showSheet) {
             if (isTablet) {
                 scope.launch {
@@ -216,6 +224,10 @@ fun DSBApp(viewModel: MainViewModel) {
             showAbout = false
         } else if (showDebug) {
             showDebug = false
+        } else if (showCalendar) {
+            showCalendar = false
+        } else if (showStats) {
+            showStats = false
         } else if (uiState is UiState.SelectingClass) {
             viewModel.cancelClassSelection()
         } else {
@@ -354,19 +366,32 @@ fun DSBApp(viewModel: MainViewModel) {
                                 Box(Modifier.fillMaxSize())
                             }
                         }
-                        1 -> ArchiveScreen(archiveEntries, isRoomFirst, onRemove = viewModel::removeFromArchive, modifier = Modifier.nestedScroll(scrollTrackerConnection))
+                        1 -> ArchiveScreen(
+                            archiveEntries,
+                            isRoomFirst,
+                            onRemove = viewModel::removeFromArchive,
+                            onOpenCalendar = { showCalendar = true },
+                            onOpenStats = { showStats = true },
+                            modifier = Modifier.nestedScroll(scrollTrackerConnection)
+                        )
                         2 -> SettingsScreen(
                             isRoomFirst = isRoomFirst,
                             sortByPeriod = sortByPeriod,
                             dynamicColor = dynamicColor,
                             navHidden = navHidden,
                             selectedClasses = selectedClasses,
+                            autoFetchEnabled = autoFetchEnabled,
+                            autoFetchInterval = autoFetchInterval,
+                            notificationsEnabled = notificationsEnabled,
                             onToggleOrder = viewModel::toggleColumnOrder,
                             onToggleSort = viewModel::toggleSortByPeriod,
                             onToggleDynamic = viewModel::toggleDynamicColor,
                             onToggleNavHidden = viewModel::toggleNavHidden,
                             onOpenThemePicker = { showThemePicker = true },
                             onOpenTypographyPicker = { showTypographyPicker = true },
+                            onToggleAutoFetch = viewModel::toggleAutoFetch,
+                            onSetAutoFetchInterval = { viewModel.setAutoFetchInterval(it) },
+                            onToggleNotifications = viewModel::toggleNotifications,
                             onChangeClass = viewModel::changeClass,
                             onLogout = viewModel::logout,
                             onAbout = { showAbout = true },
@@ -427,6 +452,8 @@ fun DSBApp(viewModel: MainViewModel) {
                 showTypographyPicker = showTypographyPicker,
                 showAbout = showAbout,
                 showDebug = showDebug,
+                showCalendar = showCalendar,
+                showStats = showStats,
                 uiState = uiState,
                 themeIndex = themeIndex,
                 dynamicColor = dynamicColor,
@@ -437,20 +464,54 @@ fun DSBApp(viewModel: MainViewModel) {
                 fontSlnt = fontSlnt,
                 fontGrad = fontGrad,
                 fontRond = fontRond,
+                allArchiveEntries = archiveEntries,
+                isRoomFirst = isRoomFirst,
+                calendarEntries = archiveEntries.groupBy { it.day }.map { (day, entries) -> day to entries.size }.sortedBy { day ->
+                    val dateRegex = Regex("""(\d{2})\.(\d{2})\.(\d{4})""")
+                    val match = dateRegex.find(day.first)
+                    if (match != null) {
+                        val (d, m, y) = match.destructured
+                        y.toLong() * 10000 + m.toLong() * 100 + d.toLong()
+                    } else Long.MAX_VALUE
+                },
+                statsData = remember(archiveEntries) {
+                    if (archiveEntries.isEmpty()) StatsData()
+                    else {
+                        val entriesBySubject = archiveEntries.groupBy { it.subject }
+                        val entriesByType = archiveEntries.groupBy { it.art }
+                        StatsData(
+                            totalEntries = archiveEntries.size,
+                            totalDays = archiveEntries.groupBy { it.day }.size,
+                            mostCancelledSubject = entriesBySubject.maxByOrNull { it.value.size }?.key ?: "",
+                            mostCancelledCount = entriesBySubject.maxOfOrNull { it.value.size } ?: 0,
+                            typeBreakdown = entriesByType.map { (type, list) -> type to list.size }.sortedByDescending { it.second },
+                            busiestLesson = archiveEntries.groupBy { it.lesson }.maxByOrNull { it.value.size }?.key ?: "",
+                            busiestLessonCount = archiveEntries.groupBy { it.lesson }.maxOfOrNull { it.value.size } ?: 0,
+                            classCount = archiveEntries.groupBy { it.className }.size,
+                            subjectCount = entriesBySubject.size,
+                            roomCount = archiveEntries.groupBy { it.room }.size
+                        )
+                    }
+                },
+                calendarSelectedDay = calendarSelectedDay,
                 onSelectTheme = { viewModel.setThemeIndex(it) },
                 onCloseThemePicker = { showThemePicker = false },
                 onCloseTypographyPicker = { showTypographyPicker = false },
                 onToggleCustomFont = viewModel::toggleCustomFont,
-                onFontWeightChange = viewModel::setFontWeight,
-                onFontWidthChange = viewModel::setFontWidth,
-                onFontOpszChange = viewModel::setFontOpsz,
-                onFontSlntChange = viewModel::setFontSlnt,
-                onFontGradChange = viewModel::setFontGrad,
-                onFontRondChange = viewModel::setFontRond,
+                onFontWeightChange = { viewModel.setFontWeight(it) },
+                onFontWidthChange = { viewModel.setFontWidth(it) },
+                onFontOpszChange = { viewModel.setFontOpsz(it) },
+                onFontSlntChange = { viewModel.setFontSlnt(it) },
+                onFontGradChange = { viewModel.setFontGrad(it) },
+                onFontRondChange = { viewModel.setFontRond(it) },
                 onCloseAbout = { showAbout = false },
                 onOpenDebug = { showAbout = false; showDebug = true },
                 onCloseDebug = { showDebug = false },
+                onCalendarDayClick = { calendarSelectedDay = if (calendarSelectedDay == it) null else it },
+                onCloseCalendar = { showCalendar = false },
+                onCloseStats = { showStats = false },
                 onSelectClass = { u, p, cls -> viewModel.selectClass(u, p, cls) },
+                onSelectAllClasses = { u, p -> viewModel.selectAllClasses(u, p) },
                 onLogin = viewModel::login,
                 onLoginDemo = viewModel::loginDemo
             )
@@ -578,6 +639,83 @@ fun DSBApp(viewModel: MainViewModel) {
 }
 }
 }
+}
+@Composable
+fun CalendarViewScreen(
+    archiveDates: List<Pair<String, Int>>,
+    allArchiveEntries: List<SubstitutionEntry>,
+    isRoomFirst: Boolean,
+    selectedDay: String?,
+    onDayClick: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    BackHandler(enabled = selectedDay != null) {
+        onDayClick(selectedDay!!)
+    }
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = {
+                    if (selectedDay != null) {
+                        onDayClick(selectedDay)
+                    } else {
+                        onBack()
+                    }
+                }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                }
+                Text(
+                    text = stringResource(R.string.label_calendar),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (selectedDay != null) {
+                val dayEntries = allArchiveEntries.filter { it.day == selectedDay }
+                SubstitutionViewer(selectedDay, dayEntries, isRoomFirst, true)
+            } else {
+                CalendarView(
+                    archiveDates = archiveDates,
+                    selectedDay = selectedDay,
+                    isRoomFirst = isRoomFirst,
+                    onDayClick = onDayClick,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StatsViewScreen(
+    statsData: StatsData,
+    onBack: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                }
+                Text(
+                    text = stringResource(R.string.label_statistics),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            StatsScreen(
+                statsData = statsData,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
 }
 @Composable
 fun ThemePickerScreen(
@@ -904,7 +1042,14 @@ private fun ThemeSwatchItem(
 }
 
 @Composable
-fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemove: (SubstitutionEntry) -> Unit, modifier: Modifier = Modifier) {
+fun ArchiveScreen(
+    entries: List<SubstitutionEntry>,
+    isRoomFirst: Boolean,
+    onRemove: (SubstitutionEntry) -> Unit,
+    onOpenCalendar: () -> Unit,
+    onOpenStats: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     if (entries.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             androidx.compose.animation.AnimatedVisibility(
@@ -914,13 +1059,27 @@ fun ArchiveScreen(entries: List<SubstitutionEntry>, isRoomFirst: Boolean, onRemo
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
                     Spacer(Modifier.height(16.dp))
-                    Text("No archived substitutions", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.msg_no_substitutions), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
                 }
             }
         }
     } else {
         val grouped = entries.groupBy { it.day }
         LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = onOpenCalendar, modifier = Modifier.weight(1f), shape = MaterialTheme.shapes.large) {
+                        Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.action_open_calendar))
+                    }
+                    OutlinedButton(onClick = onOpenStats, modifier = Modifier.weight(1f), shape = MaterialTheme.shapes.large) {
+                        Icon(Icons.Default.BarChart, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.action_open_stats))
+                    }
+                }
+            }
             grouped.forEach { (day, dayEntries) ->
                 item {
                     Text(day, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp))
@@ -956,12 +1115,18 @@ fun SettingsScreen(
     dynamicColor: Boolean,
     navHidden: Boolean,
     selectedClasses: List<String> = emptyList(),
+    autoFetchEnabled: Boolean = false,
+    autoFetchInterval: Int = 30,
+    notificationsEnabled: Boolean = true,
     onToggleOrder: () -> Unit,
     onToggleSort: () -> Unit,
     onToggleDynamic: () -> Unit,
     onToggleNavHidden: () -> Unit,
     onOpenThemePicker: () -> Unit,
     onOpenTypographyPicker: () -> Unit,
+    onToggleAutoFetch: () -> Unit = {},
+    onSetAutoFetchInterval: (Int) -> Unit = {},
+    onToggleNotifications: () -> Unit = {},
     onChangeClass: () -> Unit,
     onLogout: () -> Unit,
     onAbout: () -> Unit,
@@ -1036,6 +1201,61 @@ fun SettingsScreen(
                                 icon = Icons.Default.ColorLens,
                                 onClick = onOpenThemePicker
                             )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.label_auto_fetch),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+                )
+            }
+
+            item {
+                SettingCard {
+                    Column {
+                        SettingItem(
+                            title = stringResource(R.string.label_auto_fetch),
+                            description = stringResource(R.string.desc_auto_fetch),
+                            icon = Icons.Default.Sync,
+                            isActive = autoFetchEnabled,
+                            trailing = { ExpressiveSwitch(checked = autoFetchEnabled, onCheckedChange = { onToggleAutoFetch() }) }
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                        SettingItem(
+                            title = stringResource(R.string.label_notifications),
+                            description = stringResource(R.string.desc_notifications),
+                            icon = Icons.Default.Notifications,
+                            isActive = notificationsEnabled,
+                            trailing = { ExpressiveSwitch(checked = notificationsEnabled, onCheckedChange = { onToggleNotifications() }) }
+                        )
+                        if (autoFetchEnabled) {
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                            var sliderValue by remember { mutableFloatStateOf(autoFetchInterval.toFloat()) }
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(stringResource(R.string.label_fetch_interval), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.format_interval, sliderValue.toInt()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Slider(
+                                    value = sliderValue,
+                                    onValueChange = { sliderValue = it },
+                                    onValueChangeFinished = { onSetAutoFetchInterval(sliderValue.toInt()) },
+                                    valueRange = 15f..120f,
+                                    steps = 6
+                                )
+                            }
                         }
                     }
                 }
@@ -1431,6 +1651,8 @@ fun OverlayContent(
     showTypographyPicker: Boolean,
     showAbout: Boolean,
     showDebug: Boolean,
+    showCalendar: Boolean,
+    showStats: Boolean,
     uiState: UiState,
     themeIndex: Int,
     dynamicColor: Boolean,
@@ -1441,6 +1663,11 @@ fun OverlayContent(
     fontSlnt: Float,
     fontGrad: Float,
     fontRond: Float,
+    calendarEntries: List<Pair<String, Int>>,
+    allArchiveEntries: List<SubstitutionEntry>,
+    isRoomFirst: Boolean,
+    statsData: StatsData,
+    calendarSelectedDay: String?,
     onSelectTheme: (Int) -> Unit,
     onCloseThemePicker: () -> Unit,
     onCloseTypographyPicker: () -> Unit,
@@ -1454,16 +1681,32 @@ fun OverlayContent(
     onCloseAbout: () -> Unit,
     onOpenDebug: () -> Unit,
     onCloseDebug: () -> Unit,
+    onCalendarDayClick: (String) -> Unit,
+    onCloseCalendar: () -> Unit,
+    onCloseStats: () -> Unit,
     onSelectClass: (String, String, String) -> Unit,
+    onSelectAllClasses: (String, String) -> Unit,
     onLogin: (String, String) -> Unit,
     onLoginDemo: () -> Unit
 ) {
     androidx.compose.animation.AnimatedVisibility(
-        visible = showThemePicker || showTypographyPicker || showAbout || showDebug || uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass,
+        visible = showThemePicker || showTypographyPicker || showAbout || showDebug || showCalendar || showStats || uiState is UiState.NeedsLogin || uiState is UiState.Loading || uiState is UiState.SelectingClass,
         enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.92f, animationSpec = tween(300)),
         exit = fadeOut(tween(250)) + scaleOut(targetScale = 0.92f, animationSpec = tween(250))
     ) {
         when {
+            showCalendar -> CalendarViewScreen(
+                archiveDates = calendarEntries,
+                allArchiveEntries = allArchiveEntries,
+                isRoomFirst = isRoomFirst,
+                selectedDay = calendarSelectedDay,
+                onDayClick = onCalendarDayClick,
+                onBack = onCloseCalendar
+            )
+            showStats -> StatsViewScreen(
+                statsData = statsData,
+                onBack = onCloseStats
+            )
             showThemePicker -> ThemePickerScreen(
                 currentIndex = themeIndex,
                 dynamicColor = dynamicColor,
@@ -1494,7 +1737,8 @@ fun OverlayContent(
                 val s = uiState
                 ClassSelectionScreen(
                     classes = s.classes,
-                    onClassSelected = { cls -> onSelectClass(s.u, s.p, cls) }
+                    onClassSelected = { cls -> onSelectClass(s.u, s.p, cls) },
+                    onShowAll = { onSelectAllClasses(s.u, s.p) }
                 )
             }
             uiState is UiState.NeedsLogin -> LoginScreen(onLogin = onLogin, onLoginDemo = onLoginDemo)
@@ -1694,7 +1938,7 @@ fun LoginScreen(onLogin: (String, String) -> Unit, onLoginDemo: () -> Unit) {
 }
 
 @Composable
-fun ClassSelectionScreen(classes: List<String>, onClassSelected: (String) -> Unit) {
+fun ClassSelectionScreen(classes: List<String>, onClassSelected: (String) -> Unit, onShowAll: () -> Unit = {}) {
     var customClass by remember { mutableStateOf("") }
 
     Column(
@@ -1731,6 +1975,23 @@ fun ClassSelectionScreen(classes: List<String>, onClassSelected: (String) -> Uni
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
+            item {
+                Surface(
+                    onClick = onShowAll,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Apps, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                        Spacer(Modifier.width(16.dp))
+                        Text(stringResource(R.string.label_show_all_classes), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
             items(classes, key = { it }) { cls ->
                 Surface(
                     onClick = { onClassSelected(cls) },
@@ -2679,5 +2940,244 @@ fun FontSlider(
             valueRange = valueRange,
             steps = steps
         )
+    }
+}
+
+@Composable
+fun CalendarView(
+    archiveDates: List<Pair<String, Int>>,
+    selectedDay: String?,
+    isRoomFirst: Boolean,
+    onDayClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val dateRegex = Regex("""(\d{2})\.(\d{2})\.(\d{4})""")
+
+    val monthNamesDe = listOf("Januar", "Februar", "März", "April", "Mai", "Juni",
+        "Juli", "August", "September", "Oktober", "November", "Dezember")
+
+    val withDates = mutableListOf<Pair<Triple<Int, Int, Int>, Pair<String, Int>>>()
+    val withoutDates = mutableListOf<Pair<String, Int>>()
+
+    archiveDates.forEach { (day, count) ->
+        val match = dateRegex.find(day)
+        if (match != null) {
+            val (d, m, y) = match.destructured
+            withDates.add(Triple(m.toInt(), d.toInt(), y.toInt()) to (day to count))
+        } else {
+            withoutDates.add(day to count)
+        }
+    }
+
+    val groupedByMonth = withDates.groupBy { it.first.first }.toSortedMap()
+
+    if (archiveDates.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                Spacer(Modifier.height(16.dp))
+                Text(stringResource(R.string.label_no_calendar_data), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+    } else {
+        LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            groupedByMonth.forEach { (month, entries) ->
+                item {
+                    val monthName = monthNamesDe.getOrElse(month - 1) { "" }
+                    val year = entries.first().first.third
+                    Text(
+                        text = "$monthName $year",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+                    )
+                }
+                items(entries.map { it.second }) { (day, count) ->
+                    CalendarDayCard(day, count, isSelected = day == selectedDay, onClick = { onDayClick(day) })
+                }
+            }
+
+            if (withoutDates.isNotEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.label_archive),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+                    )
+                }
+                items(withoutDates) { (day, count) ->
+                    CalendarDayCard(day, count, isSelected = day == selectedDay, onClick = { onDayClick(day) })
+                }
+            }
+
+            item { Spacer(Modifier.height(120.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun CalendarDayCard(day: String, count: Int, isSelected: Boolean, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        ),
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(day, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.format_substitutions_count_many, count),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun StatsScreen(
+    statsData: StatsData,
+    modifier: Modifier = Modifier
+) {
+    if (statsData.totalEntries == 0) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.BarChart, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                Spacer(Modifier.height(16.dp))
+                Text(stringResource(R.string.label_no_stats), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+    } else {
+        LazyColumn(modifier = modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                Text(stringResource(R.string.label_statistics), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
+            }
+
+            item {
+                SettingCard {
+                    Column {
+                        StatItem(icon = Icons.Default.FormatListBulleted, label = stringResource(R.string.stats_total_entries), value = statsData.totalEntries.toString())
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                        StatItem(icon = Icons.Default.DateRange, label = stringResource(R.string.stats_total_days), value = statsData.totalDays.toString())
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                        StatItem(icon = Icons.Default.Person, label = stringResource(R.string.stats_classes), value = statsData.classCount.toString())
+                    }
+                }
+            }
+
+            item {
+                SettingCard {
+                    Column {
+                        StatItem(icon = Icons.Default.MenuBook, label = stringResource(R.string.stats_subjects), value = statsData.subjectCount.toString())
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                        StatItem(icon = Icons.Default.MeetingRoom, label = stringResource(R.string.stats_rooms), value = statsData.roomCount.toString())
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(stringResource(R.string.stats_most_cancelled), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
+            }
+
+            item {
+                SettingCard {
+                    Column {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(statsData.mostCancelledSubject, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                Text("${statsData.mostCancelledCount} entries", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(stringResource(R.string.stats_busiest_lesson), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
+            }
+
+            item {
+                SettingCard {
+                    Column {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(statsData.busiestLesson, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                Text("${statsData.busiestLessonCount} entries", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (statsData.typeBreakdown.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(4.dp))
+                    Text(stringResource(R.string.stats_type_breakdown), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
+                }
+
+                item {
+                    SettingCard {
+                        Column {
+                            statsData.typeBreakdown.forEachIndexed { index, (type, count) ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    val typeColor = when {
+                                        type.lowercase().contains("entfall") -> MaterialTheme.colorScheme.error
+                                        type.lowercase().contains("vertretung") -> Color(0xFFFFB74D)
+                                        else -> MaterialTheme.colorScheme.secondary
+                                    }
+                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(typeColor))
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(type, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                                    Text("$count", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                }
+                                if (index < statsData.typeBreakdown.lastIndex) {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(120.dp)) }
+        }
+    }
+}
+
+@Composable
+fun StatItem(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.wolly.dsbmaterial.AutoFetchWorker
 import dev.wolly.dsbmaterial.DSBWidget
 import dev.wolly.dsbmaterial.api.DSBMobileAPI
 import dev.wolly.dsbmaterial.data.DataStoreManager
@@ -14,6 +15,9 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import androidx.work.*
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
 
 @Stable
 sealed class UiState {
@@ -24,6 +28,20 @@ sealed class UiState {
     object NeedsLogin : UiState()
     data class SelectingClass(val classes: List<String>, val u: String, val p: String) : UiState()
 }
+
+@Stable
+data class StatsData(
+    val totalEntries: Int = 0,
+    val totalDays: Int = 0,
+    val mostCancelledSubject: String = "",
+    val mostCancelledCount: Int = 0,
+    val typeBreakdown: List<Pair<String, Int>> = emptyList(),
+    val busiestLesson: String = "",
+    val busiestLessonCount: Int = 0,
+    val classCount: Int = 0,
+    val subjectCount: Int = 0,
+    val roomCount: Int = 0
+)
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val dataStoreManager = DataStoreManager(application)
@@ -80,6 +98,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedClasses = MutableStateFlow<List<String>>(emptyList())
     val selectedClasses: StateFlow<List<String>> = _selectedClasses
 
+    val autoFetchEnabled: StateFlow<Boolean> = dataStoreManager.autoFetchEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val autoFetchInterval: StateFlow<Int> = dataStoreManager.autoFetchIntervalFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 30)
+
+    val notificationsEnabled: StateFlow<Boolean> = dataStoreManager.notificationsEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    private val _selectedCalendarDay = MutableStateFlow<String?>(null)
+    val selectedCalendarDay: StateFlow<String?> = _selectedCalendarDay
+
     private var lastSuccessEntries: List<SubstitutionEntry> = emptyList()
     private var isDemoMode = false
 
@@ -87,6 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkCredentialsAndFetch()
         loadArchive()
         loadSelectedClasses()
+        scheduleAutoFetchOnStartup()
     }
 
     private fun loadArchive() {
@@ -108,6 +139,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _selectedClasses.value = json.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 }
             }
+        }
+    }
+
+    private fun scheduleAutoFetchOnStartup() {
+        viewModelScope.launch {
+            val enabled = dataStoreManager.autoFetchEnabledFlow.first()
+            val interval = dataStoreManager.autoFetchIntervalFlow.first()
+            scheduleAutoFetch(enabled, interval)
         }
     }
 
@@ -237,6 +276,107 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setFontRond(value: Float) {
         viewModelScope.launch { dataStoreManager.saveFontRond(value) }
+    }
+
+    fun toggleAutoFetch() {
+        viewModelScope.launch {
+            val newValue = !autoFetchEnabled.value
+            dataStoreManager.saveAutoFetchEnabled(newValue)
+            scheduleAutoFetch(newValue, autoFetchInterval.value)
+        }
+    }
+
+    fun setAutoFetchInterval(minutes: Int) {
+        viewModelScope.launch {
+            dataStoreManager.saveAutoFetchInterval(minutes)
+            if (autoFetchEnabled.value) {
+                scheduleAutoFetch(true, minutes)
+            }
+        }
+    }
+
+    fun toggleNotifications() {
+        viewModelScope.launch {
+            dataStoreManager.saveNotificationsEnabled(!notificationsEnabled.value)
+        }
+    }
+
+    private fun scheduleAutoFetch(enabled: Boolean, intervalMinutes: Int) {
+        val workManager = WorkManager.getInstance(getApplication())
+        workManager.cancelUniqueWork(AutoFetchWorker.WORK_NAME)
+        if (enabled) {
+            val request = PeriodicWorkRequestBuilder<AutoFetchWorker>(
+                intervalMinutes.toLong(), TimeUnit.MINUTES
+            )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+                .build()
+            workManager.enqueueUniquePeriodicWork(
+                AutoFetchWorker.WORK_NAME,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                request
+            )
+        }
+    }
+
+    fun selectCalendarDay(day: String?) {
+        _selectedCalendarDay.value = day
+    }
+
+    fun getArchiveDays(): List<String> {
+        return _archive.value.groupBy { it.day }.keys.sortedBy { parseDaySortKey(it) }
+    }
+
+    fun getArchiveEntriesForDay(day: String): List<SubstitutionEntry> {
+        return _archive.value.filter { it.day == day }
+    }
+
+    fun getArchiveDates(): List<Pair<String, Int>> {
+        return _archive.value
+            .groupBy { it.day }
+            .map { (day, entries) -> day to entries.size }
+            .sortedBy { parseDaySortKey(it.first) }
+    }
+
+    fun getStatsData(): StatsData {
+        val entries = _archive.value
+        if (entries.isEmpty()) return StatsData()
+
+        val totalEntries = entries.size
+        val entriesByDay = entries.groupBy { it.day }
+        val totalDays = entriesByDay.size
+
+        val entriesBySubject = entries.groupBy { it.subject }
+        val mostCancelledSubject = entriesBySubject.maxByOrNull { it.value.size }?.key ?: ""
+        val mostCancelledCount = entriesBySubject.maxOfOrNull { it.value.size } ?: 0
+
+        val entriesByType = entries.groupBy { it.art }
+        val typeBreakdown = entriesByType.map { (type, list) -> type to list.size }
+            .sortedByDescending { it.second }
+
+        val entriesByLesson = entries.groupBy { it.lesson }
+        val busiestLesson = entriesByLesson.maxByOrNull { it.value.size }?.key ?: ""
+        val busiestLessonCount = entriesByLesson.maxOfOrNull { it.value.size } ?: 0
+
+        val entriesByClass = entries.groupBy { it.className }
+        val entriesByRoom = entries.groupBy { it.room }
+
+        return StatsData(
+            totalEntries = totalEntries,
+            totalDays = totalDays,
+            mostCancelledSubject = mostCancelledSubject,
+            mostCancelledCount = mostCancelledCount,
+            typeBreakdown = typeBreakdown,
+            busiestLesson = busiestLesson,
+            busiestLessonCount = busiestLessonCount,
+            classCount = entriesByClass.size,
+            subjectCount = entriesBySubject.size,
+            roomCount = entriesByRoom.size
+        )
     }
 
     fun toggleSortByPeriod() {
@@ -370,6 +510,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             fetchData(username, password, className)
         }
     }
+
+    fun selectAllClasses(username: String, password: String) {
+        viewModelScope.launch {
+            dataStoreManager.saveCredentials(username, password, "")
+            fetchData(username, password, "")
+        }
+    }
     
     fun logout() {
         viewModelScope.launch {
@@ -384,7 +531,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val username = dataStoreManager.usernameFlow.first() ?: return@launch
             val password = dataStoreManager.passwordFlow.first() ?: return@launch
-            val className = dataStoreManager.classNameFlow.first() ?: return@launch
+            val className = dataStoreManager.classNameFlow.first() ?: ""
             if (username.isEmpty() || password.isEmpty()) return@launch
 
             _isRefreshing.value = true
@@ -392,11 +539,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val api = DSBMobileAPI(username, password)
                 val allRaw = api.getSubstitutions("")
 
-                val allClassNames = mutableSetOf(className)
-                allClassNames.addAll(_selectedClasses.value)
-
-                val filtered = allRaw.filter { entry ->
-                    allClassNames.any { cls -> entry.className.equals(cls, ignoreCase = true) }
+                val filtered = if (className.isEmpty() && _selectedClasses.value.isEmpty()) {
+                    allRaw
+                } else {
+                    val allClassNames = mutableSetOf<String>()
+                    if (className.isNotEmpty()) allClassNames.add(className)
+                    allClassNames.addAll(_selectedClasses.value)
+                    allRaw.filter { entry ->
+                        allClassNames.any { cls -> entry.className.equals(cls, ignoreCase = true) }
+                    }
                 }
 
                 val deduped = filtered.distinctBy { it.day + it.lesson + it.subject + it.room + it.art + it.text }
@@ -417,11 +568,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val api = DSBMobileAPI(u, p)
             val allRaw = api.getSubstitutions("")
 
-            val allClassNames = mutableSetOf(c)
-            allClassNames.addAll(_selectedClasses.value)
-
-            val filtered = allRaw.filter { entry ->
-                allClassNames.any { cls -> entry.className.equals(cls, ignoreCase = true) }
+            val filtered = if (c.isEmpty() && _selectedClasses.value.isEmpty()) {
+                allRaw
+            } else {
+                val allClassNames = mutableSetOf<String>()
+                if (c.isNotEmpty()) allClassNames.add(c)
+                allClassNames.addAll(_selectedClasses.value)
+                allRaw.filter { entry ->
+                    allClassNames.any { cls -> entry.className.equals(cls, ignoreCase = true) }
+                }
             }
 
             val deduped = filtered.distinctBy { it.day + it.lesson + it.subject + it.room + it.art + it.text }
